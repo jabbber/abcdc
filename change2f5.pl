@@ -1,14 +1,16 @@
 #!/usr/bin/perl -w
 #Auth: skybility
 #Date: 2012-07-31
-#Version: 2.1.1
-#Last modify: 2012-08-21
-#修改为多线程，并将host.cfg通过参数传递
-#多进程细化 (2012-08-18)- zhang
-#修改打印信息，并作变更前和变更后的状态对比，复核操作结果
-#2012-08-22 修改日志打印方式，添加了第四个参数，允许屏幕打印结果
-
+#Version: 2.1.2
+#Last modify: 2013-02-22
+#
 #change log
+#2013-02-22 修复了日志文件名中日期字段月份和日期位置颠倒的问题
+#2012-08-21
+#   修改为多线程，并将host.cfg通过参数传递
+#   多进程细化 (2012-08-18)- zhang
+#   修改打印信息，并作变更前和变更后的状态对比，复核操作结果
+#2012-08-22 修改日志打印方式，添加了第四个参数，允许屏幕打印结果
 #2012-07-31   modify std print and cancel can't login ssh server exit
 
 
@@ -96,7 +98,7 @@ if(!-d $log_dir){
 	mkdir("$log_dir", 0755);
 
 }
-my $report_filename = sprintf("./$log_dir/changeF5-%s-%4d%02d%02d%02d%02d%02d.txt",$f, $year+1900, $mday, $mon+1, $hour, $min,$sec);
+my $report_filename = sprintf("./$log_dir/changeF5-%s-%4d%02d%02d%02d%02d%02d.txt",$f, $year+1900, $mon+1, $mday, $hour, $min,$sec);
 
 print "执行结果文件:".$report_filename."请查看!\n";
 #open (FH, ">>$report_filename")||"Canot open the file!\n";
@@ -174,7 +176,7 @@ sub ssh_login(){
 		}
                 $count++;
                 my ($sec,$min,$hour,$mday,$mon,$year)=localtime(time);
-                my $report_filename = sprintf($count."-%4d%02d%02d%02d%02d%02d.txt", $year+1900, $mday, $mon+1, $hour, $min,$sec);
+                my $report_filename = sprintf($count."-%4d%02d%02d%02d%02d%02d.txt", $year+1900, $mon+1, $mday, $hour, $min,$sec);
 		if ($pid == 0){ 
 			my @hs_info = split(/\s+/, $_);
 			&Process($argx,$hs_info[0],$hs_info[1],$hs_info[2],$report_filename );
