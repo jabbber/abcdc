@@ -44,7 +44,7 @@ sub netstat {
 
 #read conf
 my %threshold;
-open FD, "$cfg_file" or die "can't open the configure file $!";
+open FD, "$cfg_file" or die "$cfg_file $!";
 while(<FD>){
     chomp;
     if (/^\s*#/ or /^\s*$/){next;}
