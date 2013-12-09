@@ -15,40 +15,21 @@
 
 use strict;
 use warnings;
-
-my $IP = "10.235.128.195";
 use IO::Socket;
-print "$#ARGV\n";
-
-my $msg = "";
-my $ProCode = "99";
-my $Date = ""; #` date +%Y%m%d`;
-my $Time = ""; #`date +%H%M%S`;
-my $SeqID = "";
-my $HostID = "$ARGV[0]";  #从参数$1读取
-my $ServerID = "$ARGV[1]"; #从参数$2读取
-my $Project = "";
-my $Source = "$ARGV[2]"; #从参数$3读取
-my $Value = "$ARGV[3]";  #从参数$4读取
-my $WarnID = "$ARGV[4]";  #从参数$5读取
-my $WarnLevel = "$ARGV[5]"; #从参数$6读取
-my $WarnText = "$ARGV[6]";  #从参数$7读取
-my $WarnShortMsg = "$ARGV[7]"; #从参数$8读取
-my $WarnDetailMsg = "$ARGV[8]"; #从参数$9读取
-my $RelType = ""; #从参数$10读取
-my $RelID = "";   #从参数$11读取
-my $RelText = ""; #从参数$12读取
 
 use FindBin qw($Bin);
 my $cfg_file = "$Bin/tcp_check.conf";
  
 my $_refresh_rate = 5; #Refresh rate of the netstat data
 
-sub netstat { 
+sub netstat
+{ 
     #Array positions for the connection type and state data 
     # acquired from the netstat output. 
     my $tcp_at = 0;
     my $tcp_state_at = 5;
+    my $local_address_at = 3;
+    my $foreign_address_at = 3;
     
     my %tempconns;
     
@@ -57,18 +38,31 @@ sub netstat {
     #Iterate through the netstat output looking for the 'tcp' keyword in the tcp_at 
     # position and the state information in the tcp_state_at position. Count each 
     # occurance of each state. 
-    foreach my $tcp (@lines){
+    foreach my $tcp (@lines)
+    {
         # skip empty lines 
-        if ($tcp eq ''){
+        if ($tcp eq '')
+        {
             next;
         }
         my @line = split /\s+/, $tcp;
-        if ($line[$tcp_at] eq 'tcp'){
-            if (exists $tempconns{$line[$tcp_state_at]}){
-                $tempconns{$line[$tcp_state_at]} += 1;
-            }else{
-                $tempconns{$line[$tcp_state_at]} = 1;
+        if ($line[$tcp_at] eq 'tcp')
+        {
+            if (! exists $tempconns{$line[$tcp_state_at]})
+            {
+                $tempconns{$line[$tcp_state_at]} = {"total" => 0,
+                                                    "local" => {},
+                                                    "foreign" => {} 
+                                                    };
             }
+            if (! exists $tempconns{$line[$tcp_state_at]}{"local"}{$line[$local_address_at]})
+            {
+                $tempconns{$line[$tcp_state_at]}{"local"}{$line[$local_address_at]} = 0;
+                $tempconns{$line[$tcp_state_at]}{"foreign"}{$line[$foreign_address_at]} = 0;
+            }
+            $tempconns{$line[$tcp_state_at]}{"total"} += 1;
+            $tempconns{$line[$tcp_state_at]}{"local"}{$line[$local_address_at]} += 1;
+            $tempconns{$line[$tcp_state_at]}{"foreign"}{$line[$foreign_address_at]} += 1;
         }
     }
     return %tempconns;
@@ -77,61 +71,101 @@ sub netstat {
 #read conf
 my %threshold;
 open FD, "$cfg_file" or die "$cfg_file $!";
-while(<FD>){
+while(<FD>)
+{
     chomp;
     if (/^\s*#/ or /^\s*$/){next;}
     my @arry = split(/\s+/,$_);
     $threshold{$arry[0]} = {
         'warning' => $arry[1],
         'alarm' => $arry[2]
-    }
+    };
 }
 close FD;
 
-sub level {
+sub level
+{
     my ($name, $value) = @_;
     my $level = 'Normal';
-    if (exists $threshold{$name}){
-        if ($value >= $threshold{$name}{'alarm'}){
+    if (exists $threshold{$name})
+    {
+        if ($value >= $threshold{$name}{'alarm'})
+        {
             $level = 'Alarm';
-        }elsif ($value >= $threshold{$name}{'warning'}){
+        }
+        elsif ($value >= $threshold{$name}{'warning'})
+        {
             $level = 'Warning';
         }
     }
     return $level;
 }
 
-sub do_check {
+sub sort_sum
+{
+    my %hash = @_;
+    my @result;
+    foreach my $address (keys %hash)
+    {
+        my $n = 0;
+        foreach (@result)
+        {
+            if ($hash{$address} >= $hash{$_})
+            {
+                splice @result, $n, 0, ($address);
+                last;
+            }
+            $n += 1;
+        }
+        if (@result == 0)
+        {
+            push @result, $address;
+        }
+    }
+    return @result;
+}
+
+sub do_check
+{
     my %conns = &netstat;
     my $detail = "";
-    my $total_level = "Normal";
-    foreach my $name (keys %conns) {
-        my $level = &level($name,$conns{$name});
-        $detail .= "value for $name is $conns{$name}, $level\n";
-        if ( $level ne 'Normal' and $total_level ne "Alarm") {
-            $total_level = $level;
+    foreach my $name (keys %conns)
+    {
+        my $level = &level($name,$conns{$name}{'total'});
+        $detail .= "value for $name is $conns{$name}{'total'}, $level\n";
+        my @local_sort = &sort_sum(%{$conns{$name}{"local"}});
+        my @foreign_sort = &sort_sum(%{$conns{$name}{"foreign"}});
+        foreach (@local_sort)
+        {
+            $detail .= "$_ $conns{$name}{'local'}{$_}\n";
+        }
+        foreach (@foreign_sort)
+        {
+            $detail .= "$_ $conns{$name}{'foreign'}{$_}\n";
         }
     }
-    return ($total_level,$detail);
+    return $detail;
 }
+
+our $warnip = "10.237.128.195";
+sub sendUDP  #发送报警
+{
+    my $str = shift;
+    my $s = IO::Socket::INET->new(PeerPort =>'31820',
+                     Proto =>'udp',
+                     PeerAddr =>$warnip) || die "socket error!\n";
+
+    print $str."\n";
+    $s->send("$str");
+    close $s;
+}
+
 #check cycle
 my $count = 0;
-while (1) {
-    my ($level, $detail) = &do_check;
-    if ($level ne "Normal"){
-        $count += 1;
-        if ($count <= 10){
-            $msg = "CUSTOM^$ProCode^$Date^$Time^$SeqID^$HostID^$ServerID^$Project^$Source^$Value^$WarnID^$WarnLevel^$WarnText^$WarnShortMsg^$WarnDetailMsg^$RelType^$RelID^$RelText";
-            my $msgx = sprintf("%d%s",length($msg),$msg);
-            my $s = IO::Socket::INET->new(PeerPort =>'31820',
-                           Proto =>'udp',
-                           PeerAddr =>$IP) || die "socket error!\n";
-            $s->send("$msgx");
-            print "$msgx";
-        }
-    }else{
-        $count = 0;
-    }
+while (1)
+{
+    my $detail = &do_check;
+    print $detail;
     print "\n";
     sleep $_refresh_rate;
 }
