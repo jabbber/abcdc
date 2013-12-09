@@ -1,17 +1,8 @@
 #!/usr/bin/env perl
 #author:        zwj@skybility.com
-#version:       0.3
-#last modfiy:   2013-12-06
+#version:       0.5
+#last modfiy:   2013-12-10
 #This script is tcp status from netstat and alarm when it is over threshold.
-
-#注：生产区的脚本，请把下面的$IP值设为"10.235.128.195"
-#    办公区则设为"10.237.128.171"
-#
-#需要携带9个参数，分别为：服务器名称，服务名称，报警源，报警值，报警id，报警级别，报警注释，报警短消息，报警详细信息
-#
-#
-#CUSTOM^机构代码^报警日期(8位)^报警时间(6位)^流水号^HostID(不超过32个半角字符)^ServerID(不超过100个半角字符)^所在项目(不超过80个半角字符)^报警源(不超过9个半角,如BMC,MYAME,SCOM,OPMS等)^报警值^报警类型编号(4位数字)^报警级别(4位,如0001)^报警级别说明(不超>过32个半角字符,如一般报警!)^报警短信(不超过640个半角字符)^报警详细信息^关联类型（查>询用，可填空）^关联ID（查询用，可填空）^关联说明（查询用，可填空）
-#
 
 use strict;
 use warnings;
@@ -86,22 +77,22 @@ close FD;
 sub level
 {
     my ($name, $value) = @_;
-    my $level = 'Normal';
+    my $level = 'normal';
     if (exists $threshold{$name})
     {
         if ($value >= $threshold{$name}{'alarm'})
         {
-            $level = 'Alarm';
+            $level = 'alarm';
         }
         elsif ($value >= $threshold{$name}{'warning'})
         {
-            $level = 'Warning';
+            $level = 'warning';
         }
     }
     return $level;
 }
 
-sub sort_sum
+sub sortSum
 {
     my %hash = @_;
     my @result;
@@ -125,32 +116,10 @@ sub sort_sum
     return @result;
 }
 
-sub do_check
-{
-    my %conns = &netstat;
-    my $detail = "";
-    foreach my $name (keys %conns)
-    {
-        my $level = &level($name,$conns{$name}{'total'});
-        $detail .= "value for $name is $conns{$name}{'total'}, $level\n";
-        my @local_sort = &sort_sum(%{$conns{$name}{"local"}});
-        my @foreign_sort = &sort_sum(%{$conns{$name}{"foreign"}});
-        foreach (@local_sort)
-        {
-            $detail .= "$_ $conns{$name}{'local'}{$_}\n";
-        }
-        foreach (@foreign_sort)
-        {
-            $detail .= "$_ $conns{$name}{'foreign'}{$_}\n";
-        }
-    }
-    return $detail;
-}
-
-our $warnip = "10.237.128.195";
 sub sendUDP  #发送报警
 {
     my $str = shift;
+    my $warnip = "10.237.128.195";
     my $s = IO::Socket::INET->new(PeerPort =>'31820',
                      Proto =>'udp',
                      PeerAddr =>$warnip) || die "socket error!\n";
@@ -160,13 +129,145 @@ sub sendUDP  #发送报警
     close $s;
 }
 
+my %stats = (
+    'LISTEN' => {
+        'ServerID'=>'tcp_listen',
+        'WarnID'=>'0001',
+        'count'=>0},
+    'ESTABLISHED' => {
+        'ServerID'=>'tcp_established',
+        'WarnID'=>'0002',
+        'count'=>0},
+    'TIME_WAIT' => {
+        'ServerID'=>'tcp_time_wait',
+        'WarnID'=>'0003',
+        'count'=>0},
+    'CLOSE_WAIT' => {
+        'ServerID'=>'tcp_close_wait',
+        'WarnID'=>'0004',
+        'count'=>0},
+    'SYN_SENT' => {
+        'ServerID'=>'tcp_syn_sent',
+        'WarnID'=>'0005',
+        'count'=>0},
+    'SYN_RECV' => {
+        'ServerID'=>'tcp_syn_recv',
+        'WarnID'=>'0006',
+        'count'=>0},
+    'SYN_WAIT' => {
+        'ServerID'=>'tcp_syn_wait',
+        'WarnID'=>'0007',
+        'count'=>0},
+    'FIN_WAIT1' => {
+        'ServerID'=>'tcp_fin_wait1',
+        'WarnID'=>'0008',
+        'count'=>0},
+    'FIN_WAIT2' => {
+        'ServerID'=>'tcp_fin_wait2',
+        'WarnID'=>'0009',
+        'count'=>0},
+    'CLOSED' => {
+        'ServerID'=>'tcp_closed',
+        'WarnID'=>'0010',
+        'count'=>0},
+    'LAST_ACK' => {
+        'ServerID'=>'tcp_last_ack',
+        'WarnID'=>'0011',
+        'count'=>0},
+    'CLOSING' => {
+        'ServerID'=>'tcp_closing',
+        'WarnID'=>'0012',
+        'count'=>0},
+    'unknown' => {
+        'ServerID'=>'tcp_unknown',
+        'WarnID'=>'0013',
+        'count'=>0},
+);
+
+my $proCode = "99";
+my $seqID = "";
+my $hostID = `hostname`;
+chomp $hostID;
+my $project = "";
+my $source = "TCPMON";
+my $relType = "";
+my $relID = "";
+my $relText = "";
+
+sub do_check
+{
+    my $date = `date +%Y%m%d`;
+    my $time = `date +%H%M%S`;
+    chomp($date, $time);
+    my %conns = &netstat;
+    foreach my $stat (keys %conns)
+    {
+        my $level = &level($stat,$conns{$stat}{'total'});
+        if ($level ne "normal")
+        {
+            $stats{$stat}{'count'} += 1;
+            if ($stats{$stat}{'count'} > 10){next;}
+            my $warnValue = $conns{$stat}{'total'};
+            my $serverID = $stats{$stat}{"ServerID"};
+            my $warnID = $stats{$stat}{"WarnID"};
+            
+            my ($warnLevel, $warnText);
+            if ($level eq "warning")
+            {
+                $warnLevel = "0004";
+                $warnText = "一般报警";
+            }
+            else
+            {
+                $warnLevel = "0005";
+                $warnText = "严重报警";
+            }
+
+            my $warnDetailMsg = '';
+            my @localSort = &sortSum(%{$conns{$stat}{"local"}});
+            my @foreignSort = &sortSum(%{$conns{$stat}{"foreign"}});
+            $warnDetailMsg .= 'Local Address:';
+            foreach (@localSort)
+            {
+                if ($conns{$stat}{"local"}{$_} == 1)
+                {
+                    last;
+                }
+                else
+                {
+                    $warnDetailMsg .= "$_ $conns{$stat}{'local'}{$_}个、"
+                }
+            }
+            $warnDetailMsg .= ' Foreign Address:';
+            foreach (@foreignSort)
+            {
+                if ($conns{$stat}{"foreign"}{$_} == 1)
+                {
+                    last;
+                }
+                else
+                {
+                    $warnDetailMsg .= "$_ $conns{$stat}{'local'}{$_}个、"
+                }
+            }
+            my $warnShortMsg = "TCP Netstat 发现处于$stat状态的链接数为$warnValue超过阀值$threshold{$stat}{$level}，请关注，处于此状态的链接前五个为：$warnDetailMsg";
+
+            my $msg = "CUSTOM^$proCode^$date^$time^$seqID^$hostID^$serverID^$project^$source^$warnValue^$warnID^$warnLevel^$warnText^$warnShortMsg^$warnDetailMsg^$relType^$relID^$relText";
+            print "$msg\n";
+            &sendUDP("$msg");
+        }
+        else
+        {
+            $stats{$stat}{'count'} = 0;
+        }
+    }
+}
+
 #check cycle
 my $count = 0;
 while (1)
 {
-    my $detail = &do_check;
-    print $detail;
-    print "\n";
+    &do_check;
     sleep $_refresh_rate;
 }
 
