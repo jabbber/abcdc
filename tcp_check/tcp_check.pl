@@ -7,11 +7,15 @@
 use strict;
 use warnings;
 use IO::Socket;
+use POSIX 'setsid';
+
+our $USER = 'root';
+our $GROUP = 'root';
+my $_refresh_rate = 5; #Refresh rate of the netstat data
 
 use FindBin qw($Bin);
 my $cfg_file = "$Bin/tcp_check.conf";
  
-my $_refresh_rate = 5; #Refresh rate of the netstat data
 
 sub netstat
 { 
@@ -263,11 +267,62 @@ sub do_check
     }
 }
 
-#check cycle
-my $count = 0;
-while (1)
-{
+while(1) {
     &do_check;
     sleep $_refresh_rate;
 }
+
+
+#------------------------------
+# create daemon process
+exit if fork;
+
+&setsid();
+
+# fork() again so the parent (session group leader) can exit.
+exit if fork;
+
+# chdir('/') to ensure our daemon doesn't keep any directory in use.
+chdir '/';
+
+# close() fds 0, 1, and 2.
+close STDIN;
+close STDOUT;
+close STDERR;
+
+# redirect fds 0, 1, and 2 to /dev/null
+open STDIN, '/dev/null';
+open STDOUT, '>/dev/null';
+open STDERR, '>/dev/null';
+
+# function to change user and group
+sub sudo {
+    my ($user, $group) = @_;
+    my $uid = (getpwnam($user))[2];
+    my $gid = (getgrnam($group))[2];
+    ($(, $)) = ($gid, "$gid $gid");
+    ($<, $>) = ($uid, $uid);
+}    
+
+# change to daemon user and group.
+&sudo($USER, $GROUP);
+
+# ignore SIGCHLD signal to avoid zombie processes
+$SIG{CHLD} = 'IGNORE';
+
+# start main loop.
+while(1) {
+    my $pid = fork;
+    if ($pid == 0)
+    {
+        &do_check;
+        exit;
+    }
+    else
+    {
+        sleep $_refresh_rate;
+    }
+}
+
+# main end
 
