@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #author:        zwj@skybility.com
-#version:       0.6
+#version:       0.7
 #last modfiy:   2013-12-10
 #This script is tcp status from netstat and alarm when it is over threshold.
 
@@ -32,7 +32,28 @@ sub netstat
     my @lines = `netstat -atn`;
     #Iterate through the netstat output looking for the 'tcp' keyword in the tcp_at 
     # position and the state information in the tcp_state_at position. Count each 
-    # occurance of each state. 
+    # occurance of each state.
+    #If 'tcp4' in the tcp_at,the OS may Unix, 'tcp4' is the keyword
+    my $keyword = 'tcp';
+    foreach my $tcp (@lines)
+    {
+        if ($tcp eq '')
+        {
+            next;
+        }
+        my @line = split /\s+/, $tcp;
+        if ($line[$tcp_at] eq 'tcp6')
+        {
+            $keyword = 'tcp';
+            last;
+        }
+        elsif ($line[$tcp_at] eq 'tcp4')
+        {
+            $keyword = 'tcp4';
+            last;
+        }
+    }
+
     foreach my $tcp (@lines)
     {
         # skip empty lines 
@@ -41,7 +62,7 @@ sub netstat
             next;
         }
         my @line = split /\s+/, $tcp;
-        if ($line[$tcp_at] eq 'tcp')
+        if ($line[$tcp_at] eq $keyword)
         {
             if (! exists $tempconns{$line[$tcp_state_at]})
             {
