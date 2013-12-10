@@ -1,11 +1,12 @@
 #!/usr/bin/env perl
 #author:        zwj@skybility.com
-#version:       0.7
+#version:       0.8
 #last modfiy:   2013-12-10
 #This script is tcp status from netstat and alarm when it is over threshold.
 
 use strict;
 use warnings;
+use autodie;
 use IO::Socket;
 use POSIX 'setsid';
 
@@ -15,6 +16,10 @@ my $_refresh_rate = 5; #Refresh rate of the netstat data
 
 use FindBin qw($Bin);
 my $cfg_file = "$Bin/tcp_monitor.conf";
+
+my $debug = 1;
+my $debuglog = "$Bin/tcp_monitor.log";
+
  
 
 sub netstat
@@ -86,7 +91,7 @@ sub netstat
 
 #read conf
 my %threshold;
-open FD, "$cfg_file" or die "$cfg_file $!";
+open FD, $cfg_file;
 while(<FD>)
 {
     chomp;
@@ -225,6 +230,13 @@ sub do_check
     my $time = `date +%H%M%S`;
     chomp($date, $time);
     my %conns = &netstat;
+    if ($debug){
+        use Data::Dumper;
+        open LOG, ">>$debuglog";
+        print LOG "时间:$date $time\n";
+        print LOG "数据采集:\n";
+        print LOG Dumper(%conns);
+    }
     foreach my $stat (keys %conns)
     {
         my $level = &level($stat,$conns{$stat}{'total'});
@@ -278,6 +290,10 @@ sub do_check
             my $warnShortMsg = "TCP Netstat 发现处于$stat状态的链接数为$warnValue超过阀值$threshold{$stat}{$level}，请关注，处于此状态的链接前五个为：$warnDetailMsg";
 
             my $msg = "CUSTOM^$proCode^$date^$time^$seqID^$hostID^$serverID^$project^$source^$warnValue^$warnID^$warnLevel^$warnText^$warnShortMsg^$warnDetailMsg^$relType^$relID^$relText";
+            if ($debug)
+            {
+                print LOG "报警信息($stat 计数:$stats{$stat}{'count'}):$msg\n";
+            }
             print "$msg\n";
             &sendUDP("$msg");
         }
@@ -285,6 +301,10 @@ sub do_check
         {
             $stats{$stat}{'count'} = 0;
         }
+    }
+    if ($debug)
+    {
+        close LOG;
     }
 }
 
