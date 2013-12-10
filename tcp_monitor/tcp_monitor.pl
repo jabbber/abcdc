@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #author:        zwj@skybility.com
-#version:       0.5
+#version:       0.6
 #last modfiy:   2013-12-10
 #This script is tcp status from netstat and alarm when it is over threshold.
 
@@ -267,61 +267,73 @@ sub do_check
     }
 }
 
-while(1) {
-    &do_check;
-    sleep $_refresh_rate;
-}
-
-
-#------------------------------
-# create daemon process
-exit if fork;
-
-&setsid();
-
-# fork() again so the parent (session group leader) can exit.
-exit if fork;
-
-# chdir('/') to ensure our daemon doesn't keep any directory in use.
-chdir '/';
-
-# close() fds 0, 1, and 2.
-close STDIN;
-close STDOUT;
-close STDERR;
-
-# redirect fds 0, 1, and 2 to /dev/null
-open STDIN, '/dev/null';
-open STDOUT, '>/dev/null';
-open STDERR, '>/dev/null';
-
-# function to change user and group
-sub sudo {
-    my ($user, $group) = @_;
-    my $uid = (getpwnam($user))[2];
-    my $gid = (getgrnam($group))[2];
-    ($(, $)) = ($gid, "$gid $gid");
-    ($<, $>) = ($uid, $uid);
-}    
-
-# change to daemon user and group.
-&sudo($USER, $GROUP);
-
-# ignore SIGCHLD signal to avoid zombie processes
-$SIG{CHLD} = 'IGNORE';
-
-# start main loop.
-while(1) {
-    my $pid = fork;
-    if ($pid == 0)
-    {
+#main begin
+if (!exists $ARGV[0])
+{
+    print "start normal...\n\n";
+    while(1) {
         &do_check;
-        exit;
-    }
-    else
-    {
         sleep $_refresh_rate;
     }
+}
+elsif ($ARGV[0] eq '-d')
+{
+    print "start as daemon...\n\n";
+    #------------------------------
+    # create daemon process
+    exit if fork;
+
+    &setsid();
+
+    # fork() again so the parent (session group leader) can exit.
+    exit if fork;
+
+    # chdir('/') to ensure our daemon doesn't keep any directory in use.
+    chdir '/';
+
+    # close() fds 0, 1, and 2.
+    close STDIN;
+    close STDOUT;
+    close STDERR;
+
+    # redirect fds 0, 1, and 2 to /dev/null
+    open STDIN, '/dev/null';
+    open STDOUT, '>/dev/null';
+    open STDERR, '>/dev/null';
+
+    # function to change user and group
+    sub sudo {
+        my ($user, $group) = @_;
+        my $uid = (getpwnam($user))[2];
+        my $gid = (getgrnam($group))[2];
+        ($(, $)) = ($gid, "$gid $gid");
+        ($<, $>) = ($uid, $uid);
+    }    
+
+    # change to daemon user and group.
+    &sudo($USER, $GROUP);
+
+    # ignore SIGCHLD signal to avoid zombie processes
+    $SIG{CHLD} = 'IGNORE';
+
+    # start main loop.
+    while(1) {
+        my $pid = fork;
+        if ($pid == 0)
+        {
+            &do_check;
+            exit;
+        }
+        else
+        {
+            sleep $_refresh_rate;
+        }
+    }
+}
+else
+{
+    print "usage:\n -d  start as daemon\n";
+    exit;
 }
 
 # main end
