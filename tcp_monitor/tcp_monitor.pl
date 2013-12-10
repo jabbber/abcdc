@@ -14,7 +14,7 @@ our $GROUP = 'root';
 my $_refresh_rate = 5; #Refresh rate of the netstat data
 
 use FindBin qw($Bin);
-my $cfg_file = "$Bin/tcp_check.conf";
+my $cfg_file = "$Bin/tcp_monitor.conf";
  
 
 sub netstat
