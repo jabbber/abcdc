@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #author:        zwj@skybility.com
-#version:       0.8
+#version:       0.9
 #last modfiy:   2013-12-10
 #This script is tcp status from netstat and alarm when it is over threshold.
 
@@ -234,8 +234,8 @@ sub do_check
         use Data::Dumper;
         open LOG, ">>$debuglog";
         print LOG "时间:$date $time\n";
-        print LOG "数据采集:\n";
-        print LOG Dumper(%conns);
+        #print LOG "数据采集:\n";
+        #print LOG Dumper(%conns);
     }
     foreach my $stat (keys %conns)
     {
@@ -243,7 +243,13 @@ sub do_check
         if ($level ne "normal")
         {
             $stats{$stat}{'count'} += 1;
-            if ($stats{$stat}{'count'} > 10){next;}
+            if ($stats{$stat}{'count'} > 10){
+                if ($debug)
+                {
+                    print LOG "报警信息($stat 计数:$stats{$stat}{'count'}):总数$conns{$stat}{'total'},报警次数超过上限10,跳过\n";
+                }
+                next;
+            }
             my $warnValue = $conns{$stat}{'total'};
             my $serverID = $stats{$stat}{"ServerID"};
             my $warnID = $stats{$stat}{"WarnID"};
@@ -299,6 +305,10 @@ sub do_check
         }
         else
         {
+            if ($debug)
+            {
+                print LOG "报警信息($stat 计数:$stats{$stat}{'count'}):总数$conns{$stat}{'total'},低于阀值，重置报警计数为0\n";
+            }
             $stats{$stat}{'count'} = 0;
         }
     }
@@ -356,6 +366,21 @@ elsif ($ARGV[0] eq '-d')
 
     # ignore SIGCHLD signal to avoid zombie processes
     $SIG{CHLD} = 'IGNORE';
+    $SIG{'INT'}  = 'IGNORE';
+    $SIG{'QUIT'} = 'IGNORE';
+    $SIG{'ALRM'} = 'IGNORE';
+    $SIG{'ILL'}  = 'IGNORE';
+    $SIG{'ABRT'} = 'IGNORE';
+    $SIG{'FPE'}  = 'IGNORE';
+    $SIG{'SEGV'} = 'IGNORE';
+    $SIG{'TERM'} = 'IGNORE';
+    $SIG{'BUS'}  = 'IGNORE';
+    $SIG{'SYS'}  = 'IGNORE';
+    $SIG{'XCPU'} = 'IGNORE';
+    $SIG{'XFSZ'} = 'IGNORE';
+    $SIG{'IOT'}  = 'IGNORE';
+    $SIG{'PIPE'} = 'IGNORE';
+    $SIG{'HUP'}  = 'IGNORE';
 
     # start main loop.
     while(1) {
