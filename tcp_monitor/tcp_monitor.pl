@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #author:        zwj@skybility.com
-#version:       1.0
+#version:       1.1
 #last modfiy:   2014-01-10
 #This script is tcp status from netstat and alarm when it is over threshold.
 #changelog:
@@ -14,6 +14,7 @@
 #    0.8 增加debug调试日志
 #    0.9 完善debug日志，完善sig屏蔽
 #    1.0 增加对Recv-Q和Send-Q的监控
+#    1.1 去除daemon方式运行时做sudo切换用户的操作
 
 use strict;
 use warnings;
@@ -21,8 +22,6 @@ use autodie;
 use IO::Socket;
 use POSIX 'setsid';
 
-our $USER = 'root';
-our $GROUP = 'root';
 my $_refresh_rate = 5; #Refresh rate of the netstat data
 
 use FindBin qw($Bin);
@@ -442,18 +441,6 @@ elsif ($ARGV[0] eq '-d')
     open STDIN, '/dev/null';
     open STDOUT, '>/dev/null';
     open STDERR, '>/dev/null';
-
-    # function to change user and group
-    sub sudo {
-        my ($user, $group) = @_;
-        my $uid = (getpwnam($user))[2];
-        my $gid = (getgrnam($group))[2];
-        ($(, $)) = ($gid, "$gid $gid");
-        ($<, $>) = ($uid, $uid);
-    }    
-
-    # change to daemon user and group.
-    &sudo($USER, $GROUP);
 
     # ignore SIGCHLD signal to avoid zombie processes
     $SIG{CHLD} = 'IGNORE';
