@@ -1,8 +1,19 @@
 #!/usr/bin/env perl
 #author:        zwj@skybility.com
-#version:       0.9
-#last modfiy:   2013-12-10
+#version:       1.0
+#last modfiy:   2014-01-10
 #This script is tcp status from netstat and alarm when it is over threshold.
+#changelog:
+#    0.1 tcp连接状态计数监控脚本
+#    0.2 加入发送报警的功能
+#    0.3 实现详细计数和排序
+#    0.4 实现 local和foreign address 分别统计;实现UDP报警信息发送
+#    0.5 添加deamon代码
+#    0.6 实现daemon功能，通过参数选择启动方式
+#    0.7 判断AIX下的ipv4连接关键字tcp4
+#    0.8 增加debug调试日志
+#    0.9 完善debug日志，完善sig屏蔽
+#    1.0 增加对Recv-Q和Send-Q的监控
 
 use strict;
 use warnings;
@@ -27,9 +38,11 @@ sub netstat
     #Array positions for the connection type and state data 
     # acquired from the netstat output. 
     my $tcp_at = 0;
+    my $tcp_recv_at = 1;
+    my $tcp_send_at = 2;
     my $tcp_state_at = 5;
     my $local_address_at = 3;
-    my $foreign_address_at = 3;
+    my $foreign_address_at = 4;
     
     my %tempconns;
     
@@ -73,7 +86,7 @@ sub netstat
             {
                 $tempconns{$line[$tcp_state_at]} = {"total" => 0,
                                                     "local" => {},
-                                                    "foreign" => {} 
+                                                    "foreign" => {},
                                                     };
             }
             if (! exists $tempconns{$line[$tcp_state_at]}{"local"}{$line[$local_address_at]})
@@ -84,6 +97,38 @@ sub netstat
             $tempconns{$line[$tcp_state_at]}{"total"} += 1;
             $tempconns{$line[$tcp_state_at]}{"local"}{$line[$local_address_at]} += 1;
             $tempconns{$line[$tcp_state_at]}{"foreign"}{$line[$foreign_address_at]} += 1;
+            
+            # add Recv-Q and Send-Q count
+            if (! exists $tempconns{"Recv-Q"})
+            {
+                $tempconns{"Recv-Q"} = {"total" => 0,
+                                        "local" => {},
+                                        "foreign" => {},
+                                        };
+                $tempconns{"Send-Q"} = {"total" => 0,
+                                        "local" => {},
+                                        "foreign" => {},
+                                        };
+            }
+            if ($tempconns{"Recv-Q"}{"total"} < $line[$tcp_recv_at]){$tempconns{"Recv-Q"}{"total"} = $line[$tcp_recv_at];}
+            if ($tempconns{"Send-Q"}{"total"} < $line[$tcp_send_at]){$tempconns{"Send-Q"}{"total"} = $line[$tcp_send_at];}
+            if (! exists $tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]})
+            {
+                $tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]} = 0;
+                $tempconns{"Recv-Q"}{"foreign"}{$line[$foreign_address_at]} = 0;
+                $tempconns{"Send-Q"}{"local"}{$line[$local_address_at]} = 0;
+                $tempconns{"Send-Q"}{"foreign"}{$line[$foreign_address_at]} = 0;
+            }
+            if ($tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]} < $line[$tcp_recv_at])
+            {
+                $tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]} = $line[$tcp_recv_at];
+                $tempconns{"Recv-Q"}{"foreign"}{$line[$foreign_address_at]} = $line[$tcp_recv_at];
+            }
+            if ($tempconns{"Send-Q"}{"local"}{$line[$local_address_at]} < $line[$tcp_send_at])
+            {
+                $tempconns{"Send-Q"}{"local"}{$line[$local_address_at]} = $line[$tcp_send_at];
+                $tempconns{"Send-Q"}{"foreign"}{$line[$foreign_address_at]} = $line[$tcp_send_at];
+            }
         }
     }
     return %tempconns;
@@ -212,6 +257,14 @@ my %stats = (
         'ServerID'=>'tcp_unknown',
         'WarnID'=>'0013',
         'count'=>0},
+    'Recv-Q' => {
+        'ServerID'=>'tcp_recv_q',
+        'WarnID'=>'0014',
+        'count'=>0},
+    'Send-Q' => {
+        'ServerID'=>'tcp_send_q',
+        'WarnID'=>'0015',
+        'count'=>0},
 );
 
 my $proCode = "99";
@@ -267,33 +320,71 @@ sub do_check
             }
 
             my $warnDetailMsg = '';
+            my $warnShortMsg = '';
             my @localSort = &sortSum(%{$conns{$stat}{"local"}});
             my @foreignSort = &sortSum(%{$conns{$stat}{"foreign"}});
-            $warnDetailMsg .= 'Local Address:';
-            foreach (@localSort)
+            if ($stat ne "Recv-Q" and $stat ne "Send-Q")
             {
-                if ($conns{$stat}{"local"}{$_} == 1)
+                $warnDetailMsg .= 'Local Address:';
+                foreach (@localSort)
                 {
-                    last;
+                    if ($conns{$stat}{"local"}{$_} == 1)
+                    {
+                        last;
+                    }
+                    else
+                    {
+                        $warnDetailMsg .= "$_ $conns{$stat}{'local'}{$_}个、"
+                    }
                 }
-                else
+                $warnDetailMsg .= ' Foreign Address:';
+                foreach (@foreignSort)
                 {
-                    $warnDetailMsg .= "$_ $conns{$stat}{'local'}{$_}个、"
+                    if ($conns{$stat}{"foreign"}{$_} == 1)
+                    {
+                        last;
+                    }
+                    else
+                    {
+                        $warnDetailMsg .= "$_ $conns{$stat}{'foreign'}{$_}个、"
+                    }
                 }
+                $warnShortMsg = "TCP Netstat 发现处于$stat状态的链接数为$warnValue超过阀值$threshold{$stat}{$level}，请关注，处于此状态的链接前五个为：$warnDetailMsg";
+            }else{
+                $warnDetailMsg .= 'Local Address:';
+                foreach (@localSort)
+                {
+                    if ($conns{$stat}{"local"}{$_} == 1)
+                    {
+                        last;
+                    }
+                    elsif (&level($stat,$conns{$stat}{'local'}{$_}) eq "normal")
+                    {
+                        last;
+                    }
+                    else
+                    {
+                        $warnDetailMsg .= "$_ $conns{$stat}{'local'}{$_}、"
+                    }
+                }
+                $warnDetailMsg .= ' Foreign Address:';
+                foreach (@foreignSort)
+                {
+                    if ($conns{$stat}{"foreign"}{$_} == 1)
+                    {
+                        last;
+                    }
+                    elsif (&level($stat,$conns{$stat}{'foreign'}{$_}) eq "normal")
+                    {
+                        last;
+                    }
+                    else
+                    {
+                        $warnDetailMsg .= "$_ $conns{$stat}{'foreign'}{$_}、"
+                    }
+                }
+                $warnShortMsg = "TCP Netstat 发现$stat的值为$warnValue超过阀值$threshold{$stat}{$level}，请关注，处于此状态的链接前五个为：$warnDetailMsg";
             }
-            $warnDetailMsg .= ' Foreign Address:';
-            foreach (@foreignSort)
-            {
-                if ($conns{$stat}{"foreign"}{$_} == 1)
-                {
-                    last;
-                }
-                else
-                {
-                    $warnDetailMsg .= "$_ $conns{$stat}{'local'}{$_}个、"
-                }
-            }
-            my $warnShortMsg = "TCP Netstat 发现处于$stat状态的链接数为$warnValue超过阀值$threshold{$stat}{$level}，请关注，处于此状态的链接前五个为：$warnDetailMsg";
 
             my $msg = "CUSTOM^$proCode^$date^$time^$seqID^$hostID^$serverID^$project^$source^$warnValue^$warnID^$warnLevel^$warnText^$warnShortMsg^$warnDetailMsg^$relType^$relID^$relText";
             if ($debug)
