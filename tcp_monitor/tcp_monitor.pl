@@ -30,21 +30,16 @@ my $cfg_file = "$Bin/tcp_monitor.conf";
 my $debug = 1;
 my $debuglog = "$Bin/tcp_monitor.log";
 
- 
+my $tcp_at = 0;
+my $tcp_recv_at = 1;
+my $tcp_send_at = 2;
+my $tcp_state_at = 5;
+my $local_address_at = 3;
+my $foreign_address_at = 4;
 
-sub netstat
-{ 
-    #Array positions for the connection type and state data 
-    # acquired from the netstat output. 
-    my $tcp_at = 0;
-    my $tcp_recv_at = 1;
-    my $tcp_send_at = 2;
-    my $tcp_state_at = 5;
-    my $local_address_at = 3;
-    my $foreign_address_at = 4;
-    
-    my %tempconns;
-    
+sub get_netstat
+{   
+    my @stats;
     #Call the netstat utility and split the output into separate lines 
     my @lines = `netstat -atn`;
     #Iterate through the netstat output looking for the 'tcp' keyword in the tcp_at 
@@ -81,55 +76,105 @@ sub netstat
         my @line = split /\s+/, $tcp;
         if ($line[$tcp_at] eq $keyword)
         {
-            if (! exists $tempconns{$line[$tcp_state_at]})
-            {
-                $tempconns{$line[$tcp_state_at]} = {"total" => 0,
-                                                    "local" => {},
-                                                    "foreign" => {},
-                                                    };
-            }
-            if (! exists $tempconns{$line[$tcp_state_at]}{"local"}{$line[$local_address_at]})
-            {
-                $tempconns{$line[$tcp_state_at]}{"local"}{$line[$local_address_at]} = 0;
-                $tempconns{$line[$tcp_state_at]}{"foreign"}{$line[$foreign_address_at]} = 0;
-            }
-            $tempconns{$line[$tcp_state_at]}{"total"} += 1;
-            $tempconns{$line[$tcp_state_at]}{"local"}{$line[$local_address_at]} += 1;
-            $tempconns{$line[$tcp_state_at]}{"foreign"}{$line[$foreign_address_at]} += 1;
-            
-            # add Recv-Q and Send-Q count
-            if (! exists $tempconns{"Recv-Q"})
-            {
-                $tempconns{"Recv-Q"} = {"total" => 0,
-                                        "local" => {},
-                                        "foreign" => {},
-                                        };
-                $tempconns{"Send-Q"} = {"total" => 0,
-                                        "local" => {},
-                                        "foreign" => {},
-                                        };
-            }
-            if ($tempconns{"Recv-Q"}{"total"} < $line[$tcp_recv_at]){$tempconns{"Recv-Q"}{"total"} = $line[$tcp_recv_at];}
-            if ($tempconns{"Send-Q"}{"total"} < $line[$tcp_send_at]){$tempconns{"Send-Q"}{"total"} = $line[$tcp_send_at];}
-            if (! exists $tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]})
-            {
-                $tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]} = 0;
-                $tempconns{"Recv-Q"}{"foreign"}{$line[$foreign_address_at]} = 0;
-                $tempconns{"Send-Q"}{"local"}{$line[$local_address_at]} = 0;
-                $tempconns{"Send-Q"}{"foreign"}{$line[$foreign_address_at]} = 0;
-            }
-            if ($tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]} < $line[$tcp_recv_at])
-            {
-                $tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]} = $line[$tcp_recv_at];
-                $tempconns{"Recv-Q"}{"foreign"}{$line[$foreign_address_at]} = $line[$tcp_recv_at];
-            }
-            if ($tempconns{"Send-Q"}{"local"}{$line[$local_address_at]} < $line[$tcp_send_at])
-            {
-                $tempconns{"Send-Q"}{"local"}{$line[$local_address_at]} = $line[$tcp_send_at];
-                $tempconns{"Send-Q"}{"foreign"}{$line[$foreign_address_at]} = $line[$tcp_send_at];
-            }
+            push @stats, $tcp;
         }
     }
+    return @stats;
+}
+
+my %tcp_map;
+
+sub netstat
+{
+    my @lines = @_;
+    my %tempconns;
+    foreach my $tcp (@lines)
+    {
+        my @line = split /\s+/, $tcp;
+        if (! exists $tempconns{$line[$tcp_state_at]})
+        {
+            $tempconns{$line[$tcp_state_at]} = {"total" => 0,
+                                                "local" => {},
+                                                "foreign" => {},
+                                                };
+        }
+        if (! exists $tempconns{$line[$tcp_state_at]}{"local"}{$line[$local_address_at]})
+        {
+            $tempconns{$line[$tcp_state_at]}{"local"}{$line[$local_address_at]} = 0;
+            $tempconns{$line[$tcp_state_at]}{"foreign"}{$line[$foreign_address_at]} = 0;
+        }
+        $tempconns{$line[$tcp_state_at]}{"total"} += 1;
+        $tempconns{$line[$tcp_state_at]}{"local"}{$line[$local_address_at]} += 1;
+        $tempconns{$line[$tcp_state_at]}{"foreign"}{$line[$foreign_address_at]} += 1;
+        
+        # add Recv-Q and Send-Q count
+        if (! exists $tempconns{"Recv-Q"})
+        {
+            $tempconns{"Recv-Q"} = {"total" => 0,
+                                    "local" => {},
+                                    "foreign" => {},
+                                    };
+            $tempconns{"Send-Q"} = {"total" => 0,
+                                    "local" => {},
+                                    "foreign" => {},
+                                    };
+        }
+        if ($tempconns{"Recv-Q"}{"total"} < $line[$tcp_recv_at]){$tempconns{"Recv-Q"}{"total"} = $line[$tcp_recv_at];}
+        if ($tempconns{"Send-Q"}{"total"} < $line[$tcp_send_at]){$tempconns{"Send-Q"}{"total"} = $line[$tcp_send_at];}
+        if (! exists $tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]})
+        {
+            $tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]} = 0;
+            $tempconns{"Recv-Q"}{"foreign"}{$line[$foreign_address_at]} = 0;
+            $tempconns{"Send-Q"}{"local"}{$line[$local_address_at]} = 0;
+            $tempconns{"Send-Q"}{"foreign"}{$line[$foreign_address_at]} = 0;
+        }
+        if ($tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]} < $line[$tcp_recv_at])
+        {
+            $tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]} = $line[$tcp_recv_at];
+            $tempconns{"Recv-Q"}{"foreign"}{$line[$foreign_address_at]} = $line[$tcp_recv_at];
+        }
+        if ($tempconns{"Send-Q"}{"local"}{$line[$local_address_at]} < $line[$tcp_send_at])
+        {
+            $tempconns{"Send-Q"}{"local"}{$line[$local_address_at]} = $line[$tcp_send_at];
+            $tempconns{"Send-Q"}{"foreign"}{$line[$foreign_address_at]} = $line[$tcp_send_at];
+        }
+    }
+    # get listening port
+    my %l_address = %{$tempconns{'LISTEN'}{'local'}};
+    my %l_port;
+    foreach (keys %l_address)
+    {
+        $_ =~ /:(\d+)/;
+        $l_port{$1} = 1;
+    }
+    foreach my $tcp (@lines)
+    {
+        # skip empty lines 
+        if ($tcp eq '')
+        {
+            next;
+        }
+        my @line = split /\s+/, $tcp;
+        $line[$local_address_at] =~ /:(\d+)/;
+        if (exists $l_port{$1} and $line[$tcp_state_at] ne 'LISTEN')
+        {
+            if (! exists $tcp_map{$line[$local_address_at]})
+            {
+                $tcp_map{$line[$local_address_at]} = {};
+            }
+            $line[$foreign_address_at] =~ /(.+):\d+$/;
+            if (! exists $tcp_map{$line[$local_address_at]}{$1})
+            {
+                $tcp_map{$line[$local_address_at]}{$1} = 1;
+            }
+            else
+            {
+                $tcp_map{$line[$local_address_at]}{$1} += 1;
+            }
+            
+        }
+    }
+
     return %tempconns;
 }
 
@@ -281,14 +326,17 @@ sub do_check
     my $date = `date +%Y%m%d`;
     my $time = `date +%H%M%S`;
     chomp($date, $time);
-    my %conns = &netstat;
+    my @stats = &get_netstat;
+    my %conns = &netstat(@stats);
     if ($debug){
         use Data::Dumper;
         open LOG, ">>$debuglog";
         print LOG "时间:$date $time\n";
         #print LOG "数据采集:\n";
         #print LOG Dumper(%conns);
+        print LOG Dumper(%tcp_map);
     }
+
     foreach my $stat (keys %conns)
     {
         my $level = &level($stat,$conns{$stat}{'total'});
