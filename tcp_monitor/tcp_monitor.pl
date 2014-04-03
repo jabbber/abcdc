@@ -82,9 +82,7 @@ sub get_netstat
     return @stats;
 }
 
-my %tcp_map;
-
-sub netstat
+sub warning_data
 {
     my @lines = @_;
     my %tempconns;
@@ -139,21 +137,26 @@ sub netstat
             $tempconns{"Send-Q"}{"foreign"}{$line[$foreign_address_at]} = $line[$tcp_send_at];
         }
     }
+    return %tempconns;
+}
+
+sub report_data
+{
+    my @lines = @_;
+    my %tcp_map;
     # get listening port
-    my %l_address = %{$tempconns{'LISTEN'}{'local'}};
     my %l_port;
-    foreach (keys %l_address)
+    foreach my $tcp (@lines)
     {
-        $_ =~ /:(\d+)/;
-        $l_port{$1} = 1;
+        my @line = split /\s+/, $tcp;
+        if ($line[$tcp_state_at] eq 'LISTEN')
+        {
+            $line[$local_address_at] =~ /:(\d+)/;
+            $l_port{$1} = 1;
+        }
     }
     foreach my $tcp (@lines)
     {
-        # skip empty lines 
-        if ($tcp eq '')
-        {
-            next;
-        }
         my @line = split /\s+/, $tcp;
         $line[$local_address_at] =~ /:(\d+)/;
         if (exists $l_port{$1} and $line[$tcp_state_at] ne 'LISTEN')
@@ -174,8 +177,7 @@ sub netstat
             
         }
     }
-
-    return %tempconns;
+    return %tcp_map;
 }
 
 #read conf
@@ -327,13 +329,14 @@ sub do_check
     my $time = `date +%H%M%S`;
     chomp($date, $time);
     my @stats = &get_netstat;
-    my %conns = &netstat(@stats);
+    my %conns = &warning_data(@stats);
     if ($debug){
         use Data::Dumper;
         open LOG, ">>$debuglog";
         print LOG "时间:$date $time\n";
         #print LOG "数据采集:\n";
         #print LOG Dumper(%conns);
+        my %tcp_map = &report_data(@stats);
         print LOG Dumper(%tcp_map);
     }
 
