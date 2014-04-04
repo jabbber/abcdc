@@ -41,7 +41,7 @@ sub get_netstat
 {   
     my @stats;
     #Call the netstat utility and split the output into separate lines 
-    my @lines = `netstat -atn`;
+    my @lines = `/usr/bin/env netstat -atn`;
     #Iterate through the netstat output looking for the 'tcp' keyword in the tcp_at 
     # position and the state information in the tcp_state_at position. Count each 
     # occurance of each state.
@@ -186,6 +186,7 @@ sub report_data
                 'ESTABLISHED' => 0,
                 'SYN_SENT' => 0,
                 'SYN_RECV' => 0,
+                'SYN_WAIT' => 0,
                 'FIN_WAIT1' => 0,
                 'FIN_WAIT2' => 0,
                 'TIME_WAIT' => 0,
@@ -204,6 +205,38 @@ sub report_data
         }
     }
     return %tcp_map;
+}
+
+#get connect command name and user
+my %comlist;
+sub get_name
+{
+    my $conn = shift;
+    if (exists $comlist{$conn})
+    {
+        return $comlist{$conn};
+    }else{
+        $comlist{$conn} = "unknown^unknown";
+        my ($side,$port,$lip,$fip) = split /\^/,$conn;
+        my @lsof = `/usr/bin/env lsof -nP +c 0 -i 4TCP:$port`;
+        my $partern;
+        if ($side eq 'server')
+        {
+            $partern = "$lip:$port->$fip:\\d+";
+        }else{
+            $partern = "$lip:\\d+->$fip:$port";
+        }
+        foreach (@lsof)
+        {
+            my @line = split /\s+/,$_;
+            if ($line[8] =~ /$partern/)
+            {
+                $comlist{$conn} = "$line[0]^$line[2]";
+                last;
+            }
+        }
+    }
+    return $comlist{$conn};
 }
 
 #read conf
@@ -397,7 +430,21 @@ sub do_check
                 $report .= '#^#';
             }
         }
-        $report .= "$date$time^tcp^$conn^$tcp_map{$conn}{'recvq'}^$tcp_map{$conn}{'sendq'}^$tcp_map{$conn}{'ESTABLISHED'}^$tcp_map{$conn}{'TIME_WAIT'}^$tcp_map{$conn}{'CLOSE_WAIT'}^$tcp_map{$conn}{'SYN_SENT'}^$tcp_map{$conn}{'SYN_RECV'}^$tcp_map{$conn}{'FIN_WAIT1'}^$tcp_map{$conn}{'FIN_WAIT2'}^$tcp_map{$conn}{'CLOSE'}^$tcp_map{$conn}{'LAST_ACK'}^$tcp_map{$conn}{'CLOSING'}^$tcp_map{$conn}{'UNKNOWN'}";
+        my $name_and_user = &get_name($conn);
+        my ($side,$port,$lip,$fip) = split /\^/,$conn;
+        my $address;
+        if ($side eq 'server')
+        {
+            $address = "$side^$lip^$port^$fip^";
+        }else{
+            $address = "$side^$lip^^$fip^$port";
+        }
+        my $msgbody = "$date$time^tcp^$address^$tcp_map{$conn}{'recvq'}^$tcp_map{$conn}{'sendq'}^$tcp_map{$conn}{'ESTABLISHED'}^$tcp_map{$conn}{'TIME_WAIT'}^$tcp_map{$conn}{'CLOSE_WAIT'}^$tcp_map{$conn}{'SYN_SENT'}^$tcp_map{$conn}{'SYN_RECV'}^$tcp_map{$conn}{'SYN_WAIT'}^$tcp_map{$conn}{'FIN_WAIT1'}^$tcp_map{$conn}{'FIN_WAIT2'}^$tcp_map{$conn}{'CLOSE'}^$tcp_map{$conn}{'LAST_ACK'}^$tcp_map{$conn}{'CLOSING'}^$tcp_map{$conn}{'UNKNOWN'}^$name_and_user^^";
+        if ($debug)
+        {
+            print LOG "连接统计 $msgbody\n";
+        }
+        $report .= $msgbody;
     }
     if (length $report > 0)
     {
