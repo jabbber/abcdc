@@ -155,26 +155,52 @@ sub report_data
             $l_port{$1} = 1;
         }
     }
+
     foreach my $tcp (@lines)
     {
         my @line = split /\s+/, $tcp;
+        if ($line[$tcp_state_at] eq 'LISTEN')
+        {next;}
+        
+        #decide side
+        my $side = 'server';
         $line[$local_address_at] =~ /:(\d+)/;
-        if (exists $l_port{$1} and $line[$tcp_state_at] ne 'LISTEN')
+        my $port = $1;
+        if (! exists $l_port{$port})
         {
-            if (! exists $tcp_map{$line[$local_address_at]})
-            {
-                $tcp_map{$line[$local_address_at]} = {};
-            }
-            $line[$foreign_address_at] =~ /(.+):\d+$/;
-            if (! exists $tcp_map{$line[$local_address_at]}{$1})
-            {
-                $tcp_map{$line[$local_address_at]}{$1} = 1;
-            }
-            else
-            {
-                $tcp_map{$line[$local_address_at]}{$1} += 1;
-            }
-            
+            $side = 'client';
+            $line[$foreign_address_at] =~ /:(\d+)/;
+            $port = $1;
+        }
+
+        #create hash
+        $line[$local_address_at] =~ /(.+):\d+$/;
+        my $lip = $1;
+        $line[$foreign_address_at] =~ /(.+):\d+$/;
+        my $fip = $1;
+        if (! exists $tcp_map{"$side^$port^$lip^$fip"})
+        {
+            $tcp_map{"$side^$port^$lip^$fip"} = {
+                'recvq' => 0,
+                'sendq' => 0,
+                'ESTABLISHED' => 0,
+                'SYN_SENT' => 0,
+                'SYN_RECV' => 0,
+                'FIN_WAIT1' => 0,
+                'FIN_WAIT2' => 0,
+                'TIME_WAIT' => 0,
+                'CLOSE' => 0,
+                'CLOSE_WAIT' => 0,
+                'LAST_ACK' => 0,
+                'CLOSING' => 0,
+                'UNKNOWN' => 0
+            };
+        }
+        else
+        {
+            $tcp_map{"$side^$port^$lip^$fip"}{$line[$tcp_state_at]} += 1;
+            $tcp_map{"$side^$port^$lip^$fip"}{'recvq'} += $line[$tcp_recv_at];
+            $tcp_map{"$side^$port^$lip^$fip"}{'sendq'} += $line[$tcp_send_at];
         }
     }
     return %tcp_map;
@@ -240,10 +266,26 @@ sub sortSum
 sub sendUDP  #发送报警
 {
     my $str = shift;
-    my $warnip = "10.237.128.195";
-    my $s = IO::Socket::INET->new(PeerPort =>'31820',
+    my $ip = "10.237.128.195";
+    my $port = 31820;
+    my $s = IO::Socket::INET->new(PeerPort =>$port,
                      Proto =>'udp',
-                     PeerAddr =>$warnip) || die "socket error!\n";
+                     PeerAddr =>$ip) || die "socket error!\n";
+
+    print $str."\n";
+    $s->send("$str");
+    close $s;
+}
+
+#发送连接数报告
+sub sendReport
+{
+    my $str = shift;
+    my $ip = "10.237.128.195";
+    my $port = 31830;
+    my $s = IO::Socket::INET->new(PeerPort =>$port,
+                     Proto =>'udp',
+                     PeerAddr =>$ip) || die "socket error!\n";
 
     print $str."\n";
     $s->send("$str");
@@ -330,16 +372,39 @@ sub do_check
     chomp($date, $time);
     my @stats = &get_netstat;
     my %conns = &warning_data(@stats);
+    my %tcp_map = &report_data(@stats);
     if ($debug){
         use Data::Dumper;
         open LOG, ">>$debuglog";
         print LOG "时间:$date $time\n";
         #print LOG "数据采集:\n";
         #print LOG Dumper(%conns);
-        my %tcp_map = &report_data(@stats);
-        print LOG Dumper(%tcp_map);
+        #print Dumper(%tcp_map);
     }
 
+    #生成统计报文
+    my $msghead = "SYSTEMLOG|TCPNETSTAT|$hostID|";
+    my $report = '';
+    foreach my $conn (keys %tcp_map)
+    {
+        if (length $report > 0)
+        {
+            if (length $report > 3500)
+            {
+                &sendReport($msghead.$report);
+                $report = '';
+            }else{
+                $report .= '#^#';
+            }
+        }
+        $report .= "$date$time^tcp^$conn^$tcp_map{$conn}{'recvq'}^$tcp_map{$conn}{'sendq'}^$tcp_map{$conn}{'ESTABLISHED'}^$tcp_map{$conn}{'TIME_WAIT'}^$tcp_map{$conn}{'CLOSE_WAIT'}^$tcp_map{$conn}{'SYN_SENT'}^$tcp_map{$conn}{'SYN_RECV'}^$tcp_map{$conn}{'FIN_WAIT1'}^$tcp_map{$conn}{'FIN_WAIT2'}^$tcp_map{$conn}{'CLOSE'}^$tcp_map{$conn}{'LAST_ACK'}^$tcp_map{$conn}{'CLOSING'}^$tcp_map{$conn}{'UNKNOWN'}";
+    }
+    if (length $report > 0)
+    {
+        &sendReport($msghead.$report);
+    }
+
+    #生成报警报文
     foreach my $stat (keys %conns)
     {
         my $level = &level($stat,$conns{$stat}{'total'});
