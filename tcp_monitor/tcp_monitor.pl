@@ -36,13 +36,14 @@ use English;
 
 my $os = $OSNAME;
 
-my $netstat_cmd = '/usr/bin/env netstat -atn';
 my $tcp_at = 0;
 my $tcp_recv_at = 1;
 my $tcp_send_at = 2;
-my $tcp_state_at = 5;
 my $local_address_at = 3;
 my $foreign_address_at = 4;
+my $tcp_state_at = 5;
+
+my $netstat_cmd = '/usr/bin/env netstat -atn';
 my $keyword = 'tcp';
 
 if ($os eq 'linux')
@@ -51,12 +52,6 @@ if ($os eq 'linux')
 elsif ($os eq 'windows')
 {
 $netstat_cmd = 'C:\Windows\System32\NETSTAT -ano -p tcp';
-$tcp_at = 0;
-$tcp_recv_at = 0;
-$tcp_send_at = 0;
-$tcp_state_at = 3;
-$local_address_at = 1;
-$foreign_address_at = 2;
 $keyword = 'TCP';
 }
 elsif ($os eq 'aix')
@@ -103,7 +98,15 @@ sub get_netstat
         my @line = split /\s+/, $tcp;
         if ($line[$tcp_at] eq $keyword)
         {
-            push @stats, $tcp;
+            if ($os ne 'windows')
+            {
+                push @stats, $tcp;
+            }
+            else
+            {
+                if ($line[3] eq 'LISTENING'){$line[3] = 'LISTEN';}
+                push @stats, "$line[0] 0 0 $line[1] $line[2] $line[3]";
+            }
         }
     }
     return @stats;
@@ -133,38 +136,35 @@ sub warning_data
         $tempconns{$line[$tcp_state_at]}{"foreign"}{$line[$foreign_address_at]} += 1;
         
         # add Recv-Q and Send-Q count
-        if ($os eq 'linux')
+        if (! exists $tempconns{"Recv-Q"})
         {
-            if (! exists $tempconns{"Recv-Q"})
-            {
-                $tempconns{"Recv-Q"} = {"total" => 0,
-                                        "local" => {},
-                                        "foreign" => {},
-                                        };
-                $tempconns{"Send-Q"} = {"total" => 0,
-                                        "local" => {},
-                                        "foreign" => {},
-                                        };
-            }
-            if ($tempconns{"Recv-Q"}{"total"} < $line[$tcp_recv_at]){$tempconns{"Recv-Q"}{"total"} = $line[$tcp_recv_at];}
-            if ($tempconns{"Send-Q"}{"total"} < $line[$tcp_send_at]){$tempconns{"Send-Q"}{"total"} = $line[$tcp_send_at];}
-            if (! exists $tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]})
-            {
-                $tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]} = 0;
-                $tempconns{"Recv-Q"}{"foreign"}{$line[$foreign_address_at]} = 0;
-                $tempconns{"Send-Q"}{"local"}{$line[$local_address_at]} = 0;
-                $tempconns{"Send-Q"}{"foreign"}{$line[$foreign_address_at]} = 0;
-            }
-            if ($tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]} < $line[$tcp_recv_at])
-            {
-                $tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]} = $line[$tcp_recv_at];
-                $tempconns{"Recv-Q"}{"foreign"}{$line[$foreign_address_at]} = $line[$tcp_recv_at];
-            }
-            if ($tempconns{"Send-Q"}{"local"}{$line[$local_address_at]} < $line[$tcp_send_at])
-            {
-                $tempconns{"Send-Q"}{"local"}{$line[$local_address_at]} = $line[$tcp_send_at];
-                $tempconns{"Send-Q"}{"foreign"}{$line[$foreign_address_at]} = $line[$tcp_send_at];
-            }
+            $tempconns{"Recv-Q"} = {"total" => 0,
+                                    "local" => {},
+                                    "foreign" => {},
+                                    };
+            $tempconns{"Send-Q"} = {"total" => 0,
+                                    "local" => {},
+                                    "foreign" => {},
+                                    };
+        }
+        if ($tempconns{"Recv-Q"}{"total"} < $line[$tcp_recv_at]){$tempconns{"Recv-Q"}{"total"} = $line[$tcp_recv_at];}
+        if ($tempconns{"Send-Q"}{"total"} < $line[$tcp_send_at]){$tempconns{"Send-Q"}{"total"} = $line[$tcp_send_at];}
+        if (! exists $tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]})
+        {
+            $tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]} = 0;
+            $tempconns{"Recv-Q"}{"foreign"}{$line[$foreign_address_at]} = 0;
+            $tempconns{"Send-Q"}{"local"}{$line[$local_address_at]} = 0;
+            $tempconns{"Send-Q"}{"foreign"}{$line[$foreign_address_at]} = 0;
+        }
+        if ($tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]} < $line[$tcp_recv_at])
+        {
+            $tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]} = $line[$tcp_recv_at];
+            $tempconns{"Recv-Q"}{"foreign"}{$line[$foreign_address_at]} = $line[$tcp_recv_at];
+        }
+        if ($tempconns{"Send-Q"}{"local"}{$line[$local_address_at]} < $line[$tcp_send_at])
+        {
+            $tempconns{"Send-Q"}{"local"}{$line[$local_address_at]} = $line[$tcp_send_at];
+            $tempconns{"Send-Q"}{"foreign"}{$line[$foreign_address_at]} = $line[$tcp_send_at];
         }
     }
     return %tempconns;
@@ -230,8 +230,11 @@ sub report_data
         else
         {
             $tcp_map{"$side^$port^$lip^$fip"}{$line[$tcp_state_at]} += 1;
-            $tcp_map{"$side^$port^$lip^$fip"}{'recvq'} += $line[$tcp_recv_at];
-            $tcp_map{"$side^$port^$lip^$fip"}{'sendq'} += $line[$tcp_send_at];
+            if ($os ne 'windows')
+            {
+                $tcp_map{"$side^$port^$lip^$fip"}{'recvq'} += $line[$tcp_recv_at];
+                $tcp_map{"$side^$port^$lip^$fip"}{'sendq'} += $line[$tcp_send_at];
+            }
         }
     }
     return %tcp_map;
