@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #author:        zwj@skybility.com
-#version:       1.1
+#version:       1.2.1
 #last modfiy:   2014-01-10
 #This script is tcp status from netstat and alarm when it is over threshold.
 #changelog:
@@ -15,6 +15,8 @@
 #    0.9 完善debug日志，完善sig屏蔽
 #    1.0 增加对Recv-Q和Send-Q的监控
 #    1.1 去除daemon方式运行时做sudo切换用户的操作
+#    1.2 增加TCP连接统计信息发送
+#    1.2.1 修改fork方式，保证只有一个后台进程运行
 
 use strict;
 use warnings;
@@ -29,6 +31,12 @@ my $cfg_file = "$Bin/tcp_monitor.conf";
 
 my $debug = 1;
 my $debuglog = "$Bin/tcp_monitor.log";
+
+
+use English;
+
+my $os = $OSNAME;
+
 
 my $tcp_at = 0;
 my $tcp_recv_at = 1;
@@ -624,15 +632,15 @@ elsif ($ARGV[0] eq '-d')
     $SIG{'HUP'}  = 'IGNORE';
 
     # start main loop.
-    while(1) {
-        my $pid = fork;
-        if ($pid == 0)
-        {
+    my $pid = fork;
+    if ($pid == 0)
+    {
+        exit;
+    }
+    else
+    {
+        while(1) {
             &do_check;
-            exit;
-        }
-        else
-        {
             sleep $_refresh_rate;
         }
     }
