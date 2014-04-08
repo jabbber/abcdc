@@ -17,11 +17,13 @@
 #    1.1 去除daemon方式运行时做sudo切换用户的操作
 #    1.2 增加TCP连接统计信息发送
 #    1.2.1 修改fork方式，保证只有一个后台进程运行
+#    1.3 支持windows上运行
 
 use strict;
 use warnings;
 use IO::Socket;
 use POSIX 'setsid';
+use Time::Piece;
 
 my $_refresh_rate = 5; #Refresh rate of the netstat data
 
@@ -35,6 +37,10 @@ my $debuglog = "$Bin/tcp_monitor.log";
 use English;
 
 my $os = $OSNAME;
+my $os_linux = 'linux';
+my $os_win = 'MSWin32';
+my $os_aix = 'aix';
+
 
 my $tcp_at = 0;
 my $tcp_recv_at = 1;
@@ -46,18 +52,19 @@ my $tcp_state_at = 5;
 my $netstat_cmd = '/usr/bin/env netstat -atn';
 my $keyword = 'tcp';
 
-if ($os eq 'linux')
+if ($os eq $os_linux)
 {
 }
-elsif ($os eq 'windows')
+elsif ($os eq $os_win)
 {
 $netstat_cmd = 'C:\Windows\System32\NETSTAT -ano -p tcp';
 $keyword = 'TCP';
 }
-elsif ($os eq 'aix')
+elsif ($os eq $os_aix)
 {
 $keyword = 'tcp4';
 }
+
 
 sub get_netstat
 {   
@@ -91,21 +98,24 @@ sub get_netstat
     foreach my $tcp (@lines)
     {
         # skip empty lines 
-        if ($tcp eq '')
+        my @line = split /\s+/, $tcp;
+        if (scalar @line < 5)
         {
             next;
         }
-        my @line = split /\s+/, $tcp;
-        if ($line[$tcp_at] eq $keyword)
+        if ($os ne $os_win)
         {
-            if ($os ne 'windows')
+            if ($line[$tcp_at] eq $keyword)
             {
                 push @stats, $tcp;
             }
-            else
+        }
+        else
+        {
+            if ($line[1] eq $keyword)
             {
-                if ($line[3] eq 'LISTENING'){$line[3] = 'LISTEN';}
-                push @stats, "$line[0] 0 0 $line[1] $line[2] $line[3] $line[4]";
+                if ($line[4] eq 'LISTENING'){$line[4] = 'LISTEN';}
+                push @stats, "$line[1] 0 0 $line[2] $line[3] $line[4] $line[5]";
             }
         }
     }
@@ -227,7 +237,7 @@ sub report_data
                 'UNKNOWN' => 0,
                 'pid' => 0
             };
-            if ($os eq 'windows')
+            if ($os eq $os_win)
             {
                 $tcp_map{"$side^$port^$lip^$fip"}{'pid'} = $line[6];
             }
@@ -237,7 +247,7 @@ sub report_data
             $tcp_map{"$side^$port^$lip^$fip"}{$line[$tcp_state_at]} += 1;
             $tcp_map{"$side^$port^$lip^$fip"}{'recvq'} += $line[$tcp_recv_at];
             $tcp_map{"$side^$port^$lip^$fip"}{'sendq'} += $line[$tcp_send_at];
-            if ($os eq 'windows' and $tcp_map{"$side^$port^$lip^$fip"}{'pid'} eq '0')
+            if ($os eq $os_win and $tcp_map{"$side^$port^$lip^$fip"}{'pid'} eq '0')
             {
                 $tcp_map{"$side^$port^$lip^$fip"}{'pid'} = $line[6];
             }
@@ -257,7 +267,7 @@ sub get_name
         return $comlist{$conn};
     }else{
         $comlist{$conn} = "unknown^unknown";
-        if ($os ne 'windows')
+        if ($os ne $os_win)
         {
             my ($side,$port,$lip,$fip) = split /\^/,$conn;
             my @lsof = `/usr/bin/env lsof -nP +c 0 -i 4TCP:$port`;
@@ -280,13 +290,24 @@ sub get_name
         }
         else
         {
-            my @tasklist = `C:\\Windows\\System32\\tasklist.exe`;
+            my @tasklist = `C:\\Windows\\System32\\tasklist.exe -v`;
             foreach (@tasklist)
             {
                 my @line = split /\s+/,$_;
+                if (scalar @line < 7)
+                {
+                    next;
+                }
                 if ($line[1] eq $pid)
                 {
-                    $comlist{$conn} = "$line[0]^$line[2]";
+                    if ($line[7] eq 'NT')
+                    {
+                        $comlist{$conn} = "$line[0]^NT $line[8]";
+                    }
+                    else
+                    {
+                        $comlist{$conn} = "$line[0]^$line[7]";
+                    }
                     last;
                 }
             }
@@ -446,8 +467,8 @@ my %stats = (
 
 my $proCode = "99";
 my $seqID = "";
-my $hostID = `hostname`;
-chomp $hostID;
+use Sys::Hostname;
+my $hostID = hostname;
 my $project = "";
 my $source = "TCPMON";
 my $relType = "";
@@ -456,9 +477,9 @@ my $relText = "";
 
 sub do_check
 {
-    my $date = `date +%Y%m%d`;
-    my $time = `date +%H%M%S`;
-    chomp($date, $time);
+    my $t = localtime;
+    my $date = $t->ymd('');
+    my $time = $t->hms('');
     my @stats = &get_netstat;
     my %conns = &warning_data(@stats);
     my %tcp_map = &report_data(@stats);
@@ -466,6 +487,7 @@ sub do_check
         use Data::Dumper;
         open LOG, ">>$debuglog" || die "open $debuglog file error!\n";
         print LOG "时间:$date $time\n";
+        print "\n";
         #print LOG "数据采集:\n";
         #print LOG Dumper(%conns);
         #print Dumper(%tcp_map);
