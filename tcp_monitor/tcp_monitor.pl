@@ -105,7 +105,7 @@ sub get_netstat
             else
             {
                 if ($line[3] eq 'LISTENING'){$line[3] = 'LISTEN';}
-                push @stats, "$line[0] 0 0 $line[1] $line[2] $line[3]";
+                push @stats, "$line[0] 0 0 $line[1] $line[2] $line[3] $line[4]";
             }
         }
     }
@@ -224,16 +224,22 @@ sub report_data
                 'CLOSE_WAIT' => 0,
                 'LAST_ACK' => 0,
                 'CLOSING' => 0,
-                'UNKNOWN' => 0
+                'UNKNOWN' => 0,
+                'pid' => 0
             };
+            if ($os eq 'windows')
+            {
+                $tcp_map{"$side^$port^$lip^$fip"}{'pid'} = $line[6];
+            }
         }
         else
         {
             $tcp_map{"$side^$port^$lip^$fip"}{$line[$tcp_state_at]} += 1;
-            if ($os ne 'windows')
+            $tcp_map{"$side^$port^$lip^$fip"}{'recvq'} += $line[$tcp_recv_at];
+            $tcp_map{"$side^$port^$lip^$fip"}{'sendq'} += $line[$tcp_send_at];
+            if ($os eq 'windows' and $tcp_map{"$side^$port^$lip^$fip"}{'pid'} eq '0')
             {
-                $tcp_map{"$side^$port^$lip^$fip"}{'recvq'} += $line[$tcp_recv_at];
-                $tcp_map{"$side^$port^$lip^$fip"}{'sendq'} += $line[$tcp_send_at];
+                $tcp_map{"$side^$port^$lip^$fip"}{'pid'} = $line[6];
             }
         }
     }
@@ -245,27 +251,44 @@ my %comlist;
 sub get_name
 {
     my $conn = shift;
+    my $pid = shift;
     if (exists $comlist{$conn})
     {
         return $comlist{$conn};
     }else{
         $comlist{$conn} = "unknown^unknown";
-        my ($side,$port,$lip,$fip) = split /\^/,$conn;
-        my @lsof = `/usr/bin/env lsof -nP +c 0 -i 4TCP:$port`;
-        my $partern;
-        if ($side eq 'server')
+        if ($os ne 'windows')
         {
-            $partern = "$lip:$port->$fip:\\d+";
-        }else{
-            $partern = "$lip:\\d+->$fip:$port";
-        }
-        foreach (@lsof)
-        {
-            my @line = split /\s+/,$_;
-            if ($line[8] =~ /$partern/)
+            my ($side,$port,$lip,$fip) = split /\^/,$conn;
+            my @lsof = `/usr/bin/env lsof -nP +c 0 -i 4TCP:$port`;
+            my $partern;
+            if ($side eq 'server')
             {
-                $comlist{$conn} = "$line[0]^$line[2]";
-                last;
+                $partern = "$lip:$port->$fip:\\d+";
+            }else{
+                $partern = "$lip:\\d+->$fip:$port";
+            }
+            foreach (@lsof)
+            {
+                my @line = split /\s+/,$_;
+                if ($line[8] =~ /$partern/)
+                {
+                    $comlist{$conn} = "$line[0]^$line[2]";
+                    last;
+                }
+            }
+        }
+        else
+        {
+            my @tasklist = `C:\\Windows\\System32\\tasklist.exe`;
+            foreach (@tasklist)
+            {
+                my @line = split /\s+/,$_;
+                if ($line[1] eq $pid)
+                {
+                    $comlist{$conn} = "$line[0]^$line[2]";
+                    last;
+                }
             }
         }
     }
@@ -463,7 +486,7 @@ sub do_check
                 $report .= '#^#';
             }
         }
-        my $name_and_user = &get_name($conn);
+        my $name_and_user = &get_name($conn,$tcp_map{$conn}{'pid'});
         my ($side,$port,$lip,$fip) = split /\^/,$conn;
         my $address;
         if ($side eq 'server')
