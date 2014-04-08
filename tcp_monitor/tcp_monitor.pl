@@ -20,7 +20,6 @@
 
 use strict;
 use warnings;
-use autodie;
 use IO::Socket;
 use POSIX 'setsid';
 
@@ -37,42 +36,62 @@ use English;
 
 my $os = $OSNAME;
 
-
+my $netstat_cmd = '/usr/bin/env netstat -atn';
 my $tcp_at = 0;
 my $tcp_recv_at = 1;
 my $tcp_send_at = 2;
 my $tcp_state_at = 5;
 my $local_address_at = 3;
 my $foreign_address_at = 4;
+my $keyword = 'tcp';
+
+if ($os eq 'linux')
+{
+}
+elsif ($os eq 'windows')
+{
+$netstat_cmd = 'C:\Windows\System32\NETSTAT -ano -p tcp';
+$tcp_at = 0;
+$tcp_recv_at = 0;
+$tcp_send_at = 0;
+$tcp_state_at = 3;
+$local_address_at = 1;
+$foreign_address_at = 2;
+$keyword = 'TCP';
+}
+elsif ($os eq 'aix')
+{
+$keyword = 'tcp4';
+}
 
 sub get_netstat
 {   
     my @stats;
     #Call the netstat utility and split the output into separate lines 
-    my @lines = `/usr/bin/env netstat -atn`;
+    my @lines = `$netstat_cmd`;
     #Iterate through the netstat output looking for the 'tcp' keyword in the tcp_at 
     # position and the state information in the tcp_state_at position. Count each 
     # occurance of each state.
     #If 'tcp4' in the tcp_at,the OS may Unix, 'tcp4' is the keyword
-    my $keyword = 'tcp';
-    foreach my $tcp (@lines)
-    {
-        if ($tcp eq '')
-        {
-            next;
-        }
-        my @line = split /\s+/, $tcp;
-        if ($line[$tcp_at] eq 'tcp6')
-        {
-            $keyword = 'tcp';
-            last;
-        }
-        elsif ($line[$tcp_at] eq 'tcp4')
-        {
-            $keyword = 'tcp4';
-            last;
-        }
-    }
+#    my $keyword = 'tcp';
+#    foreach my $tcp (@lines)
+#    {
+#        if ($tcp eq '')
+#        {
+#            next;
+#        }
+#        my @line = split /\s+/, $tcp;
+#        if ($line[$tcp_at] eq 'tcp6')
+#        {
+#            $keyword = 'tcp';
+#            last;
+#        }
+#        elsif ($line[$tcp_at] eq 'tcp4')
+#        {
+#            $keyword = 'tcp4';
+#            last;
+#        }
+#    }
 
     foreach my $tcp (@lines)
     {
@@ -114,35 +133,38 @@ sub warning_data
         $tempconns{$line[$tcp_state_at]}{"foreign"}{$line[$foreign_address_at]} += 1;
         
         # add Recv-Q and Send-Q count
-        if (! exists $tempconns{"Recv-Q"})
+        if ($os eq 'linux')
         {
-            $tempconns{"Recv-Q"} = {"total" => 0,
-                                    "local" => {},
-                                    "foreign" => {},
-                                    };
-            $tempconns{"Send-Q"} = {"total" => 0,
-                                    "local" => {},
-                                    "foreign" => {},
-                                    };
-        }
-        if ($tempconns{"Recv-Q"}{"total"} < $line[$tcp_recv_at]){$tempconns{"Recv-Q"}{"total"} = $line[$tcp_recv_at];}
-        if ($tempconns{"Send-Q"}{"total"} < $line[$tcp_send_at]){$tempconns{"Send-Q"}{"total"} = $line[$tcp_send_at];}
-        if (! exists $tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]})
-        {
-            $tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]} = 0;
-            $tempconns{"Recv-Q"}{"foreign"}{$line[$foreign_address_at]} = 0;
-            $tempconns{"Send-Q"}{"local"}{$line[$local_address_at]} = 0;
-            $tempconns{"Send-Q"}{"foreign"}{$line[$foreign_address_at]} = 0;
-        }
-        if ($tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]} < $line[$tcp_recv_at])
-        {
-            $tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]} = $line[$tcp_recv_at];
-            $tempconns{"Recv-Q"}{"foreign"}{$line[$foreign_address_at]} = $line[$tcp_recv_at];
-        }
-        if ($tempconns{"Send-Q"}{"local"}{$line[$local_address_at]} < $line[$tcp_send_at])
-        {
-            $tempconns{"Send-Q"}{"local"}{$line[$local_address_at]} = $line[$tcp_send_at];
-            $tempconns{"Send-Q"}{"foreign"}{$line[$foreign_address_at]} = $line[$tcp_send_at];
+            if (! exists $tempconns{"Recv-Q"})
+            {
+                $tempconns{"Recv-Q"} = {"total" => 0,
+                                        "local" => {},
+                                        "foreign" => {},
+                                        };
+                $tempconns{"Send-Q"} = {"total" => 0,
+                                        "local" => {},
+                                        "foreign" => {},
+                                        };
+            }
+            if ($tempconns{"Recv-Q"}{"total"} < $line[$tcp_recv_at]){$tempconns{"Recv-Q"}{"total"} = $line[$tcp_recv_at];}
+            if ($tempconns{"Send-Q"}{"total"} < $line[$tcp_send_at]){$tempconns{"Send-Q"}{"total"} = $line[$tcp_send_at];}
+            if (! exists $tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]})
+            {
+                $tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]} = 0;
+                $tempconns{"Recv-Q"}{"foreign"}{$line[$foreign_address_at]} = 0;
+                $tempconns{"Send-Q"}{"local"}{$line[$local_address_at]} = 0;
+                $tempconns{"Send-Q"}{"foreign"}{$line[$foreign_address_at]} = 0;
+            }
+            if ($tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]} < $line[$tcp_recv_at])
+            {
+                $tempconns{"Recv-Q"}{"local"}{$line[$local_address_at]} = $line[$tcp_recv_at];
+                $tempconns{"Recv-Q"}{"foreign"}{$line[$foreign_address_at]} = $line[$tcp_recv_at];
+            }
+            if ($tempconns{"Send-Q"}{"local"}{$line[$local_address_at]} < $line[$tcp_send_at])
+            {
+                $tempconns{"Send-Q"}{"local"}{$line[$local_address_at]} = $line[$tcp_send_at];
+                $tempconns{"Send-Q"}{"foreign"}{$line[$foreign_address_at]} = $line[$tcp_send_at];
+            }
         }
     }
     return %tempconns;
@@ -249,7 +271,7 @@ sub get_name
 
 #read conf
 my %threshold;
-open FD, $cfg_file;
+open FD, $cfg_file || die "open $cfg_file file error!\n";
 while(<FD>)
 {
     chomp;
@@ -416,7 +438,7 @@ sub do_check
     my %tcp_map = &report_data(@stats);
     if ($debug){
         use Data::Dumper;
-        open LOG, ">>$debuglog";
+        open LOG, ">>$debuglog" || die "open $debuglog file error!\n";
         print LOG "时间:$date $time\n";
         #print LOG "数据采集:\n";
         #print LOG Dumper(%conns);
