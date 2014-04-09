@@ -315,7 +315,15 @@ sub get_name
             my @lsof;
             if ($os eq $os_aix)
             {
-                @lsof = `/openimis/SysChk/bin/lsof -nP +c 0 -i 4TCP:$port`;
+                if (-x '/openimis/SysChk/bin/lsof' )
+                {
+                    @lsof = `/openimis/SysChk/bin/lsof -nP +c 0 -i 4TCP:$port`;
+                }
+                else
+                {
+                    print 'Warning: not found lsof in /openimis/SysChk/bin/lsof ';
+                    return $comlist{$conn};
+                }
             }
             else
             {
