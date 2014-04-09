@@ -18,6 +18,8 @@
 #    1.2 增加TCP连接统计信息发送
 #    1.2.1 修改fork方式，保证只有一个后台进程运行
 #    1.3 支持windows上运行
+#    1.3.1 修复sles10上面取程序和用户名都是unknow的问题;增加报警和发送tcp连接信息的开关;在程序里加入报警阀值默认配置，无配置文件时使用默认配置。
+#
 
 use strict;
 use warnings;
@@ -25,15 +27,58 @@ use IO::Socket;
 use POSIX 'setsid';
 use Time::Piece;
 
+# 刷新间隔
 my $_refresh_rate = 5; #Refresh rate of the netstat data
 
 use FindBin qw($Bin);
 my $cfg_file = "$Bin/tcp_monitor.conf";
 
+# debug开关，debug日志文件名
 my $debug = 1;
 my $debuglog = "$Bin/tcp_monitor.log";
 
+# 报警开关
+my $alarm_switch = 1;
 
+# 发送tcp连接信息开关
+my $report_switch = 1;
+
+# read and set default config
+my %threshold = {
+    'ESTABLISHED' => { 'warning' => 10000, 'alarm' => 20000 },
+    'LISTEN'      => { 'warning' => 10000, 'alarm' => 20000 },
+    'TIME_WAIT'   => { 'warning' => 10000, 'alarm' => 20000 },
+    'CLOSE_WAIT'  => { 'warning' => 10000, 'alarm' => 20000 },
+    'SYN_SENT'    => { 'warning' => 10000, 'alarm' => 20000 },
+    'SYN_RECV'    => { 'warning' => 10000, 'alarm' => 20000 },
+    'SYN_WAIT'    => { 'warning' => 10000, 'alarm' => 20000 },
+    'FIN_WAIT1'   => { 'warning' => 10000, 'alarm' => 20000 },
+    'FIN_WAIT2'   => { 'warning' => 10000, 'alarm' => 20000 },
+    'CLOSED'      => { 'warning' => 10000, 'alarm' => 20000 },
+    'LAST_ACK'    => { 'warning' => 10000, 'alarm' => 20000 },
+    'CLOSING'     => { 'warning' => 10000, 'alarm' => 20000 },
+    'UNKNOWN'     => { 'warning' => 10000, 'alarm' => 20000 },
+    'Recv-Q'      => { 'warning' => 10000, 'alarm' => 20000 },
+    'Send-Q'      => { 'warning' => 10000, 'alarm' => 20000 }
+};
+
+if (-r $cfg_file)
+{
+    open FD, $cfg_file;
+    while(<FD>)
+    {
+        chomp;
+        if (/^\s*#/ or /^\s*$/){next;}
+        my @arry = split(/\s+/,$_);
+        $threshold{$arry[0]} = {
+            'warning' => $arry[1],
+            'alarm' => $arry[2]
+        };
+    }
+    close FD;
+}
+
+# decide OS
 use English;
 
 my $os = $OSNAME;
@@ -262,11 +307,11 @@ sub get_name
 {
     my $conn = shift;
     my $pid = shift;
-    if (exists $comlist{$conn})
+    if (exists $comlist{$conn} and $comlist{$conn} ne 'unknown^unknown')
     {
         return $comlist{$conn};
     }else{
-        $comlist{$conn} = "unknown^unknown";
+        $comlist{$conn} = 'unknown^unknown';
         if ($os ne $os_win)
         {
             my ($side,$port,$lip,$fip) = split /\^/,$conn;
@@ -281,7 +326,7 @@ sub get_name
             foreach (@lsof)
             {
                 my @line = split /\s+/,$_;
-                if ($line[8] =~ /$partern/)
+                if ($_ =~ /$partern/)
                 {
                     $comlist{$conn} = "$line[0]^$line[2]";
                     last;
@@ -315,21 +360,6 @@ sub get_name
     }
     return $comlist{$conn};
 }
-
-#read conf
-my %threshold;
-open FD, $cfg_file || die "open $cfg_file file error!\n";
-while(<FD>)
-{
-    chomp;
-    if (/^\s*#/ or /^\s*$/){next;}
-    my @arry = split(/\s+/,$_);
-    $threshold{$arry[0]} = {
-        'warning' => $arry[1],
-        'alarm' => $arry[2]
-    };
-}
-close FD;
 
 sub level
 {
@@ -487,162 +517,166 @@ sub do_check
         use Data::Dumper;
         open LOG, ">>$debuglog" || die "open $debuglog file error!\n";
         print LOG "时间:$date $time\n";
-        print "\n";
         #print LOG "数据采集:\n";
         #print LOG Dumper(%conns);
         #print Dumper(%tcp_map);
     }
-
+    
     #生成统计报文
-    my $msghead = "SYSTEMLOG|TCPNETSTAT|$hostID|";
-    my $report = '';
-    foreach my $conn (keys %tcp_map)
-    {
+    if ($report_switch){
+        my $msghead = "SYSTEMLOG|TCPNETSTAT|$hostID|";
+        my $report = '';
+        foreach my $conn (keys %tcp_map)
+        {
+            if (length $report > 0)
+            {
+                if (length $report > 3500)
+                {
+                    &sendReport($msghead.$report);
+                    $report = '';
+                }else{
+                    $report .= '#^#';
+                }
+            }
+            my $name_and_user = &get_name($conn,$tcp_map{$conn}{'pid'});
+            my ($side,$port,$lip,$fip) = split /\^/,$conn;
+            my $address;
+            if ($side eq 'server')
+            {
+                $address = "$side^$lip^$port^$fip^";
+            }else{
+                $address = "$side^$lip^^$fip^$port";
+            }
+            my $msgbody = "$date$time^tcp^$address^$tcp_map{$conn}{'recvq'}^$tcp_map{$conn}{'sendq'}^$tcp_map{$conn}{'ESTABLISHED'}^$tcp_map{$conn}{'TIME_WAIT'}^$tcp_map{$conn}{'CLOSE_WAIT'}^$tcp_map{$conn}{'SYN_SENT'}^$tcp_map{$conn}{'SYN_RECV'}^$tcp_map{$conn}{'SYN_WAIT'}^$tcp_map{$conn}{'FIN_WAIT1'}^$tcp_map{$conn}{'FIN_WAIT2'}^$tcp_map{$conn}{'CLOSE'}^$tcp_map{$conn}{'LAST_ACK'}^$tcp_map{$conn}{'CLOSING'}^$tcp_map{$conn}{'UNKNOWN'}^$name_and_user^^^";
+            if ($debug)
+            {
+                print LOG "连接统计 $msgbody\n";
+            }
+            $report .= $msgbody;
+        }
         if (length $report > 0)
         {
-            if (length $report > 3500)
-            {
-                &sendReport($msghead.$report);
-                $report = '';
-            }else{
-                $report .= '#^#';
-            }
+            &sendReport($msghead.$report);
         }
-        my $name_and_user = &get_name($conn,$tcp_map{$conn}{'pid'});
-        my ($side,$port,$lip,$fip) = split /\^/,$conn;
-        my $address;
-        if ($side eq 'server')
-        {
-            $address = "$side^$lip^$port^$fip^";
-        }else{
-            $address = "$side^$lip^^$fip^$port";
-        }
-        my $msgbody = "$date$time^tcp^$address^$tcp_map{$conn}{'recvq'}^$tcp_map{$conn}{'sendq'}^$tcp_map{$conn}{'ESTABLISHED'}^$tcp_map{$conn}{'TIME_WAIT'}^$tcp_map{$conn}{'CLOSE_WAIT'}^$tcp_map{$conn}{'SYN_SENT'}^$tcp_map{$conn}{'SYN_RECV'}^$tcp_map{$conn}{'SYN_WAIT'}^$tcp_map{$conn}{'FIN_WAIT1'}^$tcp_map{$conn}{'FIN_WAIT2'}^$tcp_map{$conn}{'CLOSE'}^$tcp_map{$conn}{'LAST_ACK'}^$tcp_map{$conn}{'CLOSING'}^$tcp_map{$conn}{'UNKNOWN'}^$name_and_user^^^";
-        if ($debug)
-        {
-            print LOG "连接统计 $msgbody\n";
-        }
-        $report .= $msgbody;
-    }
-    if (length $report > 0)
-    {
-        &sendReport($msghead.$report);
     }
 
     #生成报警报文
-    foreach my $stat (keys %conns)
-    {
-        my $level = &level($stat,$conns{$stat}{'total'});
-        if ($level ne "normal")
+    if ($alarm_switch){
+        foreach my $stat (keys %conns)
         {
-            $stats{$stat}{'count'} += 1;
-            if ($stats{$stat}{'count'} > 10){
+            my $level = &level($stat,$conns{$stat}{'total'});
+            if ($level ne "normal")
+            {
+                $stats{$stat}{'count'} += 1;
+                if ($stats{$stat}{'count'} > 10){
+                    if ($debug)
+                    {
+                        print LOG "报警信息($stat 计数:$stats{$stat}{'count'}):总数$conns{$stat}{'total'},报警次数超过上限10,跳过\n";
+                    }
+                    next;
+                }
+                my $warnValue = $conns{$stat}{'total'};
+                my $serverID = $stats{$stat}{"ServerID"};
+                my $warnID = $stats{$stat}{"WarnID"};
+                
+                my ($warnLevel, $warnText);
+                if ($level eq "warning")
+                {
+                    $warnLevel = "0004";
+                    $warnText = "一般报警";
+                }
+                else
+                {
+                    $warnLevel = "0005";
+                    $warnText = "严重报警";
+                }
+
+                my $warnDetailMsg = '';
+                my $warnShortMsg = '';
+                my @localSort = &sortSum(%{$conns{$stat}{"local"}});
+                my @foreignSort = &sortSum(%{$conns{$stat}{"foreign"}});
+                if ($stat ne "Recv-Q" and $stat ne "Send-Q")
+                {
+                    $warnDetailMsg .= 'Local Address:';
+                    foreach (@localSort)
+                    {
+                        if ($conns{$stat}{"local"}{$_} == 1)
+                        {
+                            last;
+                        }
+                        else
+                        {
+                            $warnDetailMsg .= "$_ $conns{$stat}{'local'}{$_}个、"
+                        }
+                    }
+                    $warnDetailMsg .= ' Foreign Address:';
+                    foreach (@foreignSort)
+                    {
+                        if ($conns{$stat}{"foreign"}{$_} == 1)
+                        {
+                            last;
+                        }
+                        else
+                        {
+                            $warnDetailMsg .= "$_ $conns{$stat}{'foreign'}{$_}个、"
+                        }
+                    }
+                    $warnShortMsg = "TCP Netstat 发现处于$stat状态的链接数为$warnValue超过阀值$threshold{$stat}{$level}，请关注，处于此状态的链接前五个为：$warnDetailMsg";
+                }else{
+                    $warnDetailMsg .= 'Local Address:';
+                    foreach (@localSort)
+                    {
+                        if ($conns{$stat}{"local"}{$_} == 1)
+                        {
+                            last;
+                        }
+                        elsif (&level($stat,$conns{$stat}{'local'}{$_}) eq "normal")
+                        {
+                            last;
+                        }
+                        else
+                        {
+                            $warnDetailMsg .= "$_ $conns{$stat}{'local'}{$_}、"
+                        }
+                    }
+                    $warnDetailMsg .= ' Foreign Address:';
+                    foreach (@foreignSort)
+                    {
+                        if ($conns{$stat}{"foreign"}{$_} == 1)
+                        {
+                            last;
+                        }
+                        elsif (&level($stat,$conns{$stat}{'foreign'}{$_}) eq "normal")
+                        {
+                            last;
+                        }
+                        else
+                        {
+                            $warnDetailMsg .= "$_ $conns{$stat}{'foreign'}{$_}、"
+                        }
+                    }
+                    $warnShortMsg = "TCP Netstat 发现$stat的值为$warnValue超过阀值$threshold{$stat}{$level}，请关注，处于此状态的链接前五个为：$warnDetailMsg";
+                }
+
+                my $msg = "CUSTOM^$proCode^$date^$time^$seqID^$hostID^$serverID^$project^$source^$warnValue^$warnID^$warnLevel^$warnText^$warnShortMsg^$warnDetailMsg^$relType^$relID^$relText";
                 if ($debug)
                 {
-                    print LOG "报警信息($stat 计数:$stats{$stat}{'count'}):总数$conns{$stat}{'total'},报警次数超过上限10,跳过\n";
+                    print LOG "报警信息($stat 计数:$stats{$stat}{'count'}):$msg\n";
                 }
-                next;
-            }
-            my $warnValue = $conns{$stat}{'total'};
-            my $serverID = $stats{$stat}{"ServerID"};
-            my $warnID = $stats{$stat}{"WarnID"};
-            
-            my ($warnLevel, $warnText);
-            if ($level eq "warning")
-            {
-                $warnLevel = "0004";
-                $warnText = "一般报警";
+                print "$msg\n";
+                &sendUDP("$msg");
             }
             else
             {
-                $warnLevel = "0005";
-                $warnText = "严重报警";
-            }
-
-            my $warnDetailMsg = '';
-            my $warnShortMsg = '';
-            my @localSort = &sortSum(%{$conns{$stat}{"local"}});
-            my @foreignSort = &sortSum(%{$conns{$stat}{"foreign"}});
-            if ($stat ne "Recv-Q" and $stat ne "Send-Q")
-            {
-                $warnDetailMsg .= 'Local Address:';
-                foreach (@localSort)
+                if ($debug)
                 {
-                    if ($conns{$stat}{"local"}{$_} == 1)
-                    {
-                        last;
-                    }
-                    else
-                    {
-                        $warnDetailMsg .= "$_ $conns{$stat}{'local'}{$_}个、"
-                    }
+                    print LOG "报警信息($stat 计数:$stats{$stat}{'count'}):总数$conns{$stat}{'total'},低于阀值，重置报警计数为0\n";
                 }
-                $warnDetailMsg .= ' Foreign Address:';
-                foreach (@foreignSort)
-                {
-                    if ($conns{$stat}{"foreign"}{$_} == 1)
-                    {
-                        last;
-                    }
-                    else
-                    {
-                        $warnDetailMsg .= "$_ $conns{$stat}{'foreign'}{$_}个、"
-                    }
-                }
-                $warnShortMsg = "TCP Netstat 发现处于$stat状态的链接数为$warnValue超过阀值$threshold{$stat}{$level}，请关注，处于此状态的链接前五个为：$warnDetailMsg";
-            }else{
-                $warnDetailMsg .= 'Local Address:';
-                foreach (@localSort)
-                {
-                    if ($conns{$stat}{"local"}{$_} == 1)
-                    {
-                        last;
-                    }
-                    elsif (&level($stat,$conns{$stat}{'local'}{$_}) eq "normal")
-                    {
-                        last;
-                    }
-                    else
-                    {
-                        $warnDetailMsg .= "$_ $conns{$stat}{'local'}{$_}、"
-                    }
-                }
-                $warnDetailMsg .= ' Foreign Address:';
-                foreach (@foreignSort)
-                {
-                    if ($conns{$stat}{"foreign"}{$_} == 1)
-                    {
-                        last;
-                    }
-                    elsif (&level($stat,$conns{$stat}{'foreign'}{$_}) eq "normal")
-                    {
-                        last;
-                    }
-                    else
-                    {
-                        $warnDetailMsg .= "$_ $conns{$stat}{'foreign'}{$_}、"
-                    }
-                }
-                $warnShortMsg = "TCP Netstat 发现$stat的值为$warnValue超过阀值$threshold{$stat}{$level}，请关注，处于此状态的链接前五个为：$warnDetailMsg";
+                $stats{$stat}{'count'} = 0;
             }
-
-            my $msg = "CUSTOM^$proCode^$date^$time^$seqID^$hostID^$serverID^$project^$source^$warnValue^$warnID^$warnLevel^$warnText^$warnShortMsg^$warnDetailMsg^$relType^$relID^$relText";
-            if ($debug)
-            {
-                print LOG "报警信息($stat 计数:$stats{$stat}{'count'}):$msg\n";
-            }
-            print "$msg\n";
-            &sendUDP("$msg");
-        }
-        else
-        {
-            if ($debug)
-            {
-                print LOG "报警信息($stat 计数:$stats{$stat}{'count'}):总数$conns{$stat}{'total'},低于阀值，重置报警计数为0\n";
-            }
-            $stats{$stat}{'count'} = 0;
         }
     }
+
     if ($debug)
     {
         close LOG;
