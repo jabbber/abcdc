@@ -19,7 +19,7 @@
 #    1.2.1 修改fork方式，保证只有一个后台进程运行
 #    1.3 支持windows上运行
 #    1.3.1 修复sles10上面取程序和用户名都是unknow的问题;增加报警和发送tcp连接信息的开关;在程序里加入报警阀值默认配置，无配置文件时使用默认配置。
-#
+#    1.4 支持aix上运行
 
 use strict;
 use warnings;
@@ -81,7 +81,7 @@ if (-r $cfg_file)
 # decide OS
 use English;
 
-my $os = $OSNAME;
+my $os = $^O;
 my $os_linux = 'linux';
 my $os_win = 'MSWin32';
 my $os_aix = 'aix';
@@ -95,7 +95,6 @@ my $foreign_address_at = 4;
 my $tcp_state_at = 5;
 
 my $netstat_cmd = '/usr/bin/env netstat -atn';
-my $keyword = 'tcp';
 
 if ($os eq $os_linux)
 {
@@ -103,11 +102,9 @@ if ($os eq $os_linux)
 elsif ($os eq $os_win)
 {
 $netstat_cmd = 'C:\Windows\System32\NETSTAT -ano -p tcp';
-$keyword = 'TCP';
 }
 elsif ($os eq $os_aix)
 {
-$keyword = 'tcp4';
 }
 
 
@@ -150,14 +147,14 @@ sub get_netstat
         }
         if ($os ne $os_win)
         {
-            if ($line[$tcp_at] eq $keyword)
+            if ($line[$tcp_at] =~ /tcp4?/ and $line[$local_address_at] =~ /\d+\.\d+\.\d+\.\d+[:\.]\d+/)
             {
                 push @stats, $tcp;
             }
         }
         else
         {
-            if ($line[1] eq $keyword)
+            if ($line[2] =~ /\d+\.\d+\.\d+\.\d+[:\.]\d+/)
             {
                 if ($line[4] eq 'LISTENING'){$line[4] = 'LISTEN';}
                 push @stats, "$line[1] 0 0 $line[2] $line[3] $line[4] $line[5]";
@@ -236,7 +233,7 @@ sub report_data
         my @line = split /\s+/, $tcp;
         if ($line[$tcp_state_at] eq 'LISTEN')
         {
-            $line[$local_address_at] =~ /:(\d+)/;
+            $line[$local_address_at] =~ /(\d+)$/;
             $l_port{$1} = 1;
         }
     }
@@ -249,19 +246,19 @@ sub report_data
         
         #decide side
         my $side = 'server';
-        $line[$local_address_at] =~ /:(\d+)/;
+        $line[$local_address_at] =~ /(\d+)$/;
         my $port = $1;
         if (! exists $l_port{$port})
         {
             $side = 'client';
-            $line[$foreign_address_at] =~ /:(\d+)/;
+            $line[$foreign_address_at] =~ /(\d+)$/;
             $port = $1;
         }
 
         #create hash
-        $line[$local_address_at] =~ /(.+):\d+$/;
+        $line[$local_address_at] =~ /(.+)[:\.]\d+$/;
         my $lip = $1;
-        $line[$foreign_address_at] =~ /(.+):\d+$/;
+        $line[$foreign_address_at] =~ /(.+)[:\.]\d+$/;
         my $fip = $1;
         if (! exists $tcp_map{"$side^$port^$lip^$fip"})
         {
@@ -315,7 +312,15 @@ sub get_name
         if ($os ne $os_win)
         {
             my ($side,$port,$lip,$fip) = split /\^/,$conn;
-            my @lsof = `/usr/bin/env lsof -nP +c 0 -i 4TCP:$port`;
+            my @lsof;
+            if ($os eq $os_aix)
+            {
+                @lsof = `/openimis/SysChk/bin/lsof -nP +c 0 -i 4TCP:$port`;
+            }
+            else
+            {
+                @lsof = `/usr/bin/env lsof -nP +c 0 -i 4TCP:$port`;
+            }
             my $partern;
             if ($side eq 'server')
             {
