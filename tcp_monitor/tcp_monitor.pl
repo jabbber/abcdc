@@ -50,23 +50,7 @@ my $report_ip = "192.168.3.128";
 my $report_port = 31830;
 
 # read and set default config
-my %threshold = (
-    'ESTABLISHED' => { 'warning' => 10000, 'alarm' => 20000 },
-    'LISTEN'      => { 'warning' => 10000, 'alarm' => 20000 },
-    'TIME_WAIT'   => { 'warning' => 10000, 'alarm' => 20000 },
-    'CLOSE_WAIT'  => { 'warning' => 10000, 'alarm' => 20000 },
-    'SYN_SENT'    => { 'warning' => 10000, 'alarm' => 20000 },
-    'SYN_RECV'    => { 'warning' => 10000, 'alarm' => 20000 },
-    'SYN_WAIT'    => { 'warning' => 10000, 'alarm' => 20000 },
-    'FIN_WAIT1'   => { 'warning' => 10000, 'alarm' => 20000 },
-    'FIN_WAIT2'   => { 'warning' => 10000, 'alarm' => 20000 },
-    'CLOSED'      => { 'warning' => 10000, 'alarm' => 20000 },
-    'LAST_ACK'    => { 'warning' => 10000, 'alarm' => 20000 },
-    'CLOSING'     => { 'warning' => 10000, 'alarm' => 20000 },
-    'UNKNOWN'     => { 'warning' => 10000, 'alarm' => 20000 },
-    'Recv-Q'      => { 'warning' => 100000, 'alarm' => 200000 },
-    'Send-Q'      => { 'warning' => 100000, 'alarm' => 200000 }
-);
+my %threshold;
 
 if (-r $cfg_file)
 {
@@ -427,7 +411,7 @@ sub sendUDP  #发送报警
     my $str = shift;
     my $s = IO::Socket::INET->new(PeerPort =>$alarm_port,
                      Proto =>'udp',
-                     PeerAddr =>$alarm_ip) || die "socket error!\n";
+                     PeerAddr =>$alarm_ip) || print "socket error!\n";
 
     print $str."\n";
     $s->send("$str");
@@ -440,7 +424,7 @@ sub sendReport
     my $str = shift;
     my $s = IO::Socket::INET->new(PeerPort =>$report_port,
                      Proto =>'udp',
-                     PeerAddr =>$report_ip) || die "socket error!\n";
+                     PeerAddr =>$report_ip) || print "socket error!\n";
 
     print $str."\n";
     $s->send("$str");
@@ -530,7 +514,7 @@ sub do_check
     my %tcp_map = &report_data(@stats);
     if ($debug){
         use Data::Dumper;
-        open LOG, ">>$debuglog" || die "open $debuglog file error!\n";
+        open LOG, ">>$debuglog" || print "open $debuglog file error!\n";
         print LOG "时间:$date $time\n";
         #print LOG "数据采集:\n";
         #print LOG Dumper(%conns);
@@ -736,16 +720,6 @@ elsif ($ARGV[0] eq '-d')
 
     # chdir('/') to ensure our daemon doesn't keep any directory in use.
     chdir '/';
-
-    # close() fds 0, 1, and 2.
-    close STDIN;
-    close STDOUT;
-    close STDERR;
-
-    # redirect fds 0, 1, and 2 to /dev/null
-    open STDIN, '/dev/null';
-    open STDOUT, '>/dev/null';
-    open STDERR, '>/dev/null';
 
     # ignore SIGCHLD signal to avoid zombie processes
     $SIG{CHLD} = 'IGNORE';
