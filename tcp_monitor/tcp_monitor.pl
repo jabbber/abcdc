@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #author:        zwj@skybility.com
-#version:       1.4.1
+#version:       1.4.2
 #last modfiy:   2014-04-10
 #This script is tcp status from netstat and alarm when it is over threshold.
 #changelog:
@@ -21,6 +21,7 @@
 #    1.3.1 修复sles10上面取程序和用户名都是unknow的问题;增加报警和发送tcp连接信息的开关;在程序里加入报警阀值默认配置，无配置文件时使用默认配置。
 #    1.4 支持aix上运行
 #    1.4.1 发送报警和连接信息的地址配置项放到脚本开头
+#    1.4.2 添加单次运行的功能，使用 -c 参数指定运行次数
 
 use strict;
 use warnings;
@@ -710,6 +711,17 @@ if (!exists $ARGV[0])
         sleep $_refresh_rate;
     }
 }
+elsif ($ARGV[0] eq '-c' and $ARGV[1] =~ /\d+/)
+{
+    my $count = $ARGV[1];
+    print "start and run $count times...\n\n";
+    while($count > 0) {
+        &do_check;
+        $count -= 1;
+        if ($count < 1){last;}
+        sleep $_refresh_rate;
+    }
+}
 elsif ($ARGV[0] eq '-d')
 {
     print "start as daemon...\n\n";
@@ -769,7 +781,9 @@ elsif ($ARGV[0] eq '-d')
 }
 else
 {
-    print "usage:\n -d  start as daemon\n";
+    print "usage:\n";
+    print "    -d          start as daemon\n";
+    print "    -c COUNT    run COUNT times\n";
     exit;
 }
 
