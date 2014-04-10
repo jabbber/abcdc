@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 #author:        zwj@skybility.com
-#version:       1.2.1
-#last modfiy:   2014-01-10
+#version:       1.4.1
+#last modfiy:   2014-04-10
 #This script is tcp status from netstat and alarm when it is over threshold.
 #changelog:
 #    0.1 tcp连接状态计数监控脚本
@@ -20,6 +20,7 @@
 #    1.3 支持windows上运行
 #    1.3.1 修复sles10上面取程序和用户名都是unknow的问题;增加报警和发送tcp连接信息的开关;在程序里加入报警阀值默认配置，无配置文件时使用默认配置。
 #    1.4 支持aix上运行
+#    1.4.1 发送报警和连接信息的地址配置项放到脚本开头
 
 use strict;
 use warnings;
@@ -39,9 +40,13 @@ my $debuglog = "$Bin/tcp_monitor.log";
 
 # 报警开关
 my $alarm_switch = 1;
+my $alarm_ip = "10.237.128.195";
+my $alarm_port = 31820;
 
 # 发送tcp连接信息开关
 my $report_switch = 1;
+my $report_ip = "192.168.3.128";
+my $report_port = 31830;
 
 # read and set default config
 my %threshold = (
@@ -58,8 +63,8 @@ my %threshold = (
     'LAST_ACK'    => { 'warning' => 10000, 'alarm' => 20000 },
     'CLOSING'     => { 'warning' => 10000, 'alarm' => 20000 },
     'UNKNOWN'     => { 'warning' => 10000, 'alarm' => 20000 },
-    'Recv-Q'      => { 'warning' => 10000, 'alarm' => 20000 },
-    'Send-Q'      => { 'warning' => 10000, 'alarm' => 20000 }
+    'Recv-Q'      => { 'warning' => 100000, 'alarm' => 200000 },
+    'Send-Q'      => { 'warning' => 100000, 'alarm' => 200000 }
 );
 
 if (-r $cfg_file)
@@ -419,11 +424,9 @@ sub sortSum
 sub sendUDP  #发送报警
 {
     my $str = shift;
-    my $ip = "10.237.128.195";
-    my $port = 31820;
-    my $s = IO::Socket::INET->new(PeerPort =>$port,
+    my $s = IO::Socket::INET->new(PeerPort =>$alarm_port,
                      Proto =>'udp',
-                     PeerAddr =>$ip) || die "socket error!\n";
+                     PeerAddr =>$alarm_ip) || die "socket error!\n";
 
     print $str."\n";
     $s->send("$str");
@@ -434,11 +437,9 @@ sub sendUDP  #发送报警
 sub sendReport
 {
     my $str = shift;
-    my $ip = "10.237.128.195";
-    my $port = 31830;
-    my $s = IO::Socket::INET->new(PeerPort =>$port,
+    my $s = IO::Socket::INET->new(PeerPort =>$report_port,
                      Proto =>'udp',
-                     PeerAddr =>$ip) || die "socket error!\n";
+                     PeerAddr =>$report_ip) || die "socket error!\n";
 
     print $str."\n";
     $s->send("$str");
