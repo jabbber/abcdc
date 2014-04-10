@@ -44,7 +44,7 @@ my $alarm_switch = 1;
 my $report_switch = 1;
 
 # read and set default config
-my %threshold = {
+my %threshold = (
     'ESTABLISHED' => { 'warning' => 10000, 'alarm' => 20000 },
     'LISTEN'      => { 'warning' => 10000, 'alarm' => 20000 },
     'TIME_WAIT'   => { 'warning' => 10000, 'alarm' => 20000 },
@@ -60,7 +60,7 @@ my %threshold = {
     'UNKNOWN'     => { 'warning' => 10000, 'alarm' => 20000 },
     'Recv-Q'      => { 'warning' => 10000, 'alarm' => 20000 },
     'Send-Q'      => { 'warning' => 10000, 'alarm' => 20000 }
-};
+);
 
 if (-r $cfg_file)
 {
@@ -681,6 +681,10 @@ sub do_check
             }
             else
             {
+                if (!exists $stats{$stat})
+                {
+                    print "Warning: unknow tcp status '$stat'.\n";
+                }
                 if ($debug)
                 {
                     print LOG "报警信息($stat 计数:$stats{$stat}{'count'}):总数$conns{$stat}{'total'},低于阀值，重置报警计数为0\n";
