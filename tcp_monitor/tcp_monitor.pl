@@ -41,12 +41,12 @@ my $debuglog = "$Bin/tcp_monitor.log";
 
 # 报警开关
 my $alarm_switch = 1;
-my $alarm_ip = "10.237.128.195";
+my $alarm_ip = "10.235.128.195";
 my $alarm_port = 31820;
 
 # 发送tcp连接信息开关
 my $report_switch = 1;
-my $report_ip = "192.168.3.128";
+my $report_ip = "10.235.128.195";
 my $report_port = 31830;
 
 # read and set default config
