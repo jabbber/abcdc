@@ -599,7 +599,7 @@ sub do_check
                     $warnDetailMsg .= 'Local Address:';
                     foreach (@localSort)
                     {
-                        if ($conns{$stat}{"local"}{$_} == 1)
+                        if ($conns{$stat}{"local"}{$_} == 0)
                         {
                             last;
                         }
@@ -611,7 +611,7 @@ sub do_check
                     $warnDetailMsg .= ' Foreign Address:';
                     foreach (@foreignSort)
                     {
-                        if ($conns{$stat}{"foreign"}{$_} == 1)
+                        if ($conns{$stat}{"foreign"}{$_} == 0)
                         {
                             last;
                         }
