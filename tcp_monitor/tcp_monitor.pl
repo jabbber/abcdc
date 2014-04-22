@@ -27,7 +27,7 @@ use strict;
 use warnings;
 use IO::Socket;
 use POSIX 'setsid';
-use Time::Piece;
+use Time::Local;
 
 # 刷新间隔
 my $_refresh_rate = 5; #Refresh rate of the netstat data
@@ -507,9 +507,12 @@ my $relText = "";
 
 sub do_check
 {
-    my $t = localtime;
-    my $date = $t->ymd('');
-    my $time = $t->hms('');
+    #my $t = localtime;
+    #my $date = $t->ymd('');
+    #my $time = $t->hms('');
+    my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
+    my $date = sprintf("%04d%02d%02d",$year+1900,$mon+1,$mday);
+    my $time = sprintf("%02d%02d%02d",$hour,$min,$sec);
     my @stats = &get_netstat;
     my %conns = &warning_data(@stats);
     my %tcp_map = &report_data(@stats);
