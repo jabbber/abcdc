@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 #author:        zwj@skybility.com
-#version:       1.4.2
-#last modfiy:   2014-04-10
+#version:       1.4.3
+#last modfiy:   2014-04-22
 #This script is tcp status from netstat and alarm when it is over threshold.
 #changelog:
 #    0.1 tcp连接状态计数监控脚本
@@ -22,6 +22,7 @@
 #    1.4 支持aix上运行
 #    1.4.1 发送报警和连接信息的地址配置项放到脚本开头
 #    1.4.2 添加单次运行的功能，使用 -c 参数指定运行次数
+#    1.4.3 改为用Time::Local模块计算时间（兼容更多发行版）
 
 use strict;
 use warnings;
@@ -507,9 +508,6 @@ my $relText = "";
 
 sub do_check
 {
-    #my $t = localtime;
-    #my $date = $t->ymd('');
-    #my $time = $t->hms('');
     my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
     my $date = sprintf("%04d%02d%02d",$year+1900,$mon+1,$mday);
     my $time = sprintf("%02d%02d%02d",$hour,$min,$sec);
