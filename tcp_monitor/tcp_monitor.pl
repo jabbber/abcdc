@@ -60,6 +60,7 @@ if (-r $cfg_file)
         chomp;
         if (/^\s*#/ or /^\s*$/){next;}
         my @arry = split(/\s+/,$_);
+        if (exists $arry[3]){if ($arry[3] eq 'off'){next;}}
         $threshold{$arry[0]} = {
             'warning' => $arry[1],
             'alarm' => $arry[2]
