@@ -51,7 +51,11 @@ my $report_ip = "10.235.128.195";
 my $report_port = 31830;
 
 # read and set default config
-my %threshold;
+my %threshold = (
+    'Recv-Q' => {'warning'=>8192,'alarm'=>10240},
+    'Send-Q' => {'warning'=>8192,'alarm'=>10240},
+    'TIME_WAIT' => {'warning'=>1000,'alarm'=>2000}
+);
 
 if (-r $cfg_file)
 {
@@ -61,11 +65,17 @@ if (-r $cfg_file)
         chomp;
         if (/^\s*#/ or /^\s*$/){next;}
         my @arry = split(/\s+/,$_);
-        if (exists $arry[3]){if ($arry[3] eq 'off'){next;}}
         $threshold{$arry[0]} = {
             'warning' => $arry[1],
             'alarm' => $arry[2]
         };
+        if (exists $arry[3])
+        {
+            if ($arry[3] eq 'off')
+            {
+                delete $threshold{$arry[0]};
+            }
+        }
     }
     close FD;
 }
@@ -105,30 +115,10 @@ sub get_netstat
     my @stats;
     #Call the netstat utility and split the output into separate lines 
     my @lines = `$netstat_cmd`;
+
     #Iterate through the netstat output looking for the 'tcp' keyword in the tcp_at 
     # position and the state information in the tcp_state_at position. Count each 
     # occurance of each state.
-    #If 'tcp4' in the tcp_at,the OS may Unix, 'tcp4' is the keyword
-#    my $keyword = 'tcp';
-#    foreach my $tcp (@lines)
-#    {
-#        if ($tcp eq '')
-#        {
-#            next;
-#        }
-#        my @line = split /\s+/, $tcp;
-#        if ($line[$tcp_at] eq 'tcp6')
-#        {
-#            $keyword = 'tcp';
-#            last;
-#        }
-#        elsif ($line[$tcp_at] eq 'tcp4')
-#        {
-#            $keyword = 'tcp4';
-#            last;
-#        }
-#    }
-
     foreach my $tcp (@lines)
     {
         # skip empty lines 
@@ -149,6 +139,8 @@ sub get_netstat
             if ($line[2] =~ /\d+\.\d+\.\d+\.\d+[:\.]\d+/)
             {
                 if ($line[4] eq 'LISTENING'){$line[4] = 'LISTEN';}
+                if ($line[4] eq 'FIN_WAIT_1'){$line[4] = 'FIN_WAIT1';}
+                if ($line[4] eq 'FIN_WAIT_2'){$line[4] = 'FIN_WAIT2';}
                 push @stats, "$line[1] 0 0 $line[2] $line[3] $line[4] $line[5]";
             }
         }
