@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #author:        zwj@skybility.com
-#version:       1.4.3
+#version:       1.4.4
 #last modfiy:   2014-04-22
 #This script is tcp status from netstat and alarm when it is over threshold.
 #changelog:
@@ -23,6 +23,7 @@
 #    1.4.1 发送报警和连接信息的地址配置项放到脚本开头
 #    1.4.2 添加单次运行的功能，使用 -c 参数指定运行次数
 #    1.4.3 改为用Time::Local模块计算时间（兼容更多发行版）
+#    1.4.4 修复aix上把server端连接当成client端的问题
 
 use strict;
 use warnings;
@@ -129,14 +130,14 @@ sub get_netstat
         }
         if ($os ne $os_win)
         {
-            if ($line[$tcp_at] =~ /tcp4?/ and $line[$local_address_at] =~ /\d+\.\d+\.\d+\.\d+[:\.]\d+/)
+            if ($line[$tcp_at] =~ /tcp4?/ and ($line[$local_address_at] =~ /\d+\.\d+\.\d+\.\d+[\:\.]\d+/ or $line[$local_address_at] =~ /\*[\:\.]\d+/))
             {
                 push @stats, $tcp;
             }
         }
         else
         {
-            if ($line[2] =~ /\d+\.\d+\.\d+\.\d+[:\.]\d+/)
+            if ($line[2] =~ /\d+\.\d+\.\d+\.\d+[\:\.]\d+/)
             {
                 if ($line[4] eq 'LISTENING'){$line[4] = 'LISTEN';}
                 if ($line[4] eq 'FIN_WAIT_1'){$line[4] = 'FIN_WAIT1';}
@@ -240,9 +241,9 @@ sub report_data
         }
 
         #create hash
-        $line[$local_address_at] =~ /(.+)[:\.]\d+$/;
+        $line[$local_address_at] =~ /(.+)[\:\.]\d+$/;
         my $lip = $1;
-        $line[$foreign_address_at] =~ /(.+)[:\.]\d+$/;
+        $line[$foreign_address_at] =~ /(.+)[\:\.]\d+$/;
         my $fip = $1;
         if (! exists $tcp_map{"$side^$port^$lip^$fip"})
         {
