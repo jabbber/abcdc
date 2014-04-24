@@ -218,8 +218,18 @@ sub report_data
         my @line = split /\s+/, $tcp;
         if ($line[$tcp_state_at] eq 'LISTEN')
         {
-            $line[$local_address_at] =~ /(\d+)$/;
-            $l_port{$1} = 1;
+            if ($line[$local_address_at] =~ /\*[\.\:](\d+)$/)
+            {
+                $l_port{$1} = 1;
+            }
+            elsif($line[$local_address_at] =~ /0\.0\.0\.0[\.\:](\d+)$/)
+            {
+                $l_port{$1} = 1;
+            }
+            else
+            {
+                $l_port{$line[$local_address_at]} = 1;
+            }
         }
     }
 
@@ -233,7 +243,7 @@ sub report_data
         my $side = 'server';
         $line[$local_address_at] =~ /(\d+)$/;
         my $port = $1;
-        if (! exists $l_port{$port})
+        if (! exists $l_port{$port} and ! exists $l_port{$line[$local_address_at]})
         {
             $side = 'client';
             $line[$foreign_address_at] =~ /(\d+)$/;
