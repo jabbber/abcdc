@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 #author:        zwj@skybility.com
 #version:       1.0
-#last modfiy:   2014-04-24
+#last modfiy:   2014-04-25
 #This script send tcp connect from f5.
 #changelog:
 
@@ -64,8 +64,8 @@ sub filter
 sub get_conns
 {
     # get connect status
-    #my @status_out = `~/f5.sh`;
-    my @status_out = `tmsh show sys connection`;
+    my @status_out = `~/f5.sh`;
+    #my @status_out = `tmsh show sys connection`;
 
     @status_out = &filter(@status_out);
     my %conns;
@@ -101,7 +101,7 @@ foreach my $connect (keys %conns)
             $report .= '#^#';
         }
     }
-    my $msgbody = "$date$time^tcp^$connect^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^F5^F5^^^";
+    my $msgbody = "$date$time^tcp^$connect^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^F5^customtof5^^^";
     $report .= $msgbody;
 }
 if (length $report > 0)
