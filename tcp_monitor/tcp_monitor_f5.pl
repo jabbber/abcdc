@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #author:        zwj@skybility.com
-#version:       1.0
+#version:       1.0.1
 #last modfiy:   2014-04-25
 #This script send tcp connect from f5.
 #changelog:
@@ -25,6 +25,34 @@ my $report_port = 31830;
 #    $version = $1;
 #}
 
+#### 将十进制数转换成8为二进制
+sub dectobin {
+    substr(unpack("B32",pack("N",shift)) , -8);
+}
+
+#### 将32位二进制转换成十进制
+sub bintodec {
+    unpack("N", pack("B32", substr("0" x 32 . shift, -32)));
+}
+
+#### 将二进制表示的 IP/子网掩码转换成十进制形式
+sub ipmask_bin2dec {
+    my $prefix = "";
+    my $result;
+    map { $result .= $prefix . &bintodec($_); $prefix = ".";
+    } split (/\./,shift);
+    return $result;
+}
+
+#### 将十进制表示的 IP/子网掩码转换成二进制形式
+sub ipmask_dec2bin {
+    my $prefix = "";
+    my $result;
+    map { $result .= $prefix . &dectobin($_); $prefix = ".";
+    } split (/\./,shift);
+    return $result;
+}
+
 sub sendUDP 
 {
     my $str = shift;
@@ -47,18 +75,71 @@ sub filter
         if ($line =~ /(\d+\.\d+\.\d+\.\d+\:\w+)\s+(\d+\.\d+\.\d+\.\d+\:\w+)\s+(\d+\.\d+\.\d+\.\d+\:\w+)\s+(\d+\.\d+\.\d+\.\d+\:\w+)/){
             push @output, "$1 $2 $3 $4";
         }elsif ($line =~ /(\d+\.\d+\.\d+\.\d+\:\w+)[\s\<\-\>]+(\d+\.\d+\.\d+\.\d+\:\w+)[\s\<\-\>]+(\d+\.\d+\.\d+\.\d+\:\w+)/){
-            push @output, "$1 $2 *:* $3";
+            my ($v_ip,$v_port) = split /:/, $2;
+            my $f_ip = &float_match($v_ip);
+            push @output, "$1 $2 $f_ip:* $3";
         }elsif ($line =~ /any6\.any\s+any6\.any\s+(\d+\.\d+\.\d+\.\d+\:\w+)\s+(\d+\.\d+\.\d+\.\d+\:\w+)/){
             $oneconnect_1 = "$1 $2";
         }elsif ($line =~ /any6[\s\<\-\>]+\d+\.\d+\.\d+\.\d+\:\w+[\s\<\-\>]+(\d+\.\d+\.\d+\.\d+\:\w+)/){
-            $oneconnect_1 = "*:* $1";
+            $oneconnect_1 = "$1";
         }elsif ($line =~ /(\d+\.\d+\.\d+\.\d+\:\w+)\s+(\d+\.\d+\.\d+\.\d+\:\w+)\s+any6\.any\s+any6\.any/){
             push @output, "$1 $2 $oneconnect_1";
         }elsif ($line =~ /(\d+\.\d+\.\d+\.\d+\:\w+)[\s\<\-\>]+(\d+\.\d+\.\d+\.\d+\:\w+)[\s\<\-\>]+any6/){
-            push @output, "$1 $2 $oneconnect_1";
+            my ($v_ip,$v_port) = split /:/, $2;
+            my $f_ip = &float_match($v_ip);
+            push @output, "$1 $2 $f_ip:* $oneconnect_1";
         }
     }
     return @output;
+}
+
+my %vlans;
+my %vfmap;
+sub float_match
+{
+    my $v_ip = shift;
+    if (exists $vfmap{$v_ip}){
+        return $vfmap{$v_ip};
+    }else{
+        if(%vlans == 0){
+            #my @float_out = `b self`;
+            my $float_out = `~/f5ip.sh`;
+            my @floats = split /\n(?=[^\|])/, $float_out;
+            foreach my $line (@floats)
+            {
+                if ($line =~ /^SELF\s+(\d+\.\d+\.\d+\.\d+)/)
+                {
+                    my $ip = $1;
+                    $line =~ /mask\s+(\d+\.\d+\.\d+\.\d+)/;
+                    my $mask = $1;
+                    $line =~ /VLAN\s+(\w+)/;
+                    my $vlan = $1;
+                    my $floating;
+                    if ($line =~ /floating enable/)
+                    {
+                        $floating=1;
+                    }else{
+                        $floating=0;
+                    }
+                    if (!exists $vlans{$vlan})
+                    {
+                        $vlans{$vlan} = {'ip' => $ip, 'mask' => $mask, 'floating' => $floating};
+                    }elsif($floating == 1 and $vlans{$vlan}{'floating'} == 0){
+                        $vlans{$vlan} = {'ip' => $ip, 'mask' => $mask, 'floating' => $floating};
+                    }
+                }
+            }
+        }
+        foreach my $vlan (keys %vlans)
+        {
+            if ((&ipmask_dec2bin($vlans{$vlan}{'ip'}) & &ipmask_dec2bin($vlans{$vlan}{'mask'})) eq (&ipmask_dec2bin($v_ip) & &ipmask_dec2bin($vlans{$vlan}{'mask'})))
+            {
+                $vfmap{$v_ip} = $vlans{$vlan}{'ip'};
+                return $vfmap{$v_ip};
+            }
+        }
+    }
+    return '*';
 }
 
 sub get_conns
@@ -109,3 +190,4 @@ if (length $report > 0)
     &sendUDP($msghead.$report);
 }
 
+print "\n";
