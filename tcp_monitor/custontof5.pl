@@ -64,8 +64,9 @@ sub filter
 sub get_conns
 {
     # get connect status
-    #my @status_out = `tmsh show sys connection`;
-    my @status_out = `~/f5.sh`;
+    #my @status_out = `~/f5.sh`;
+    my @status_out = `tmsh show sys connection`;
+
     @status_out = &filter(@status_out);
     my %conns;
     foreach my $connect (@status_out)
@@ -75,8 +76,8 @@ sub get_conns
         my($v_ip,$v_port) = split /:/, $line[1];
         my($f_ip,$f_port) = split /:/, $line[2];
         my($p_ip,$p_port) = split /:/, $line[3];
-        $conns{"server^v:$v_ip f:$f_ip^$v_port^$c_ip^$c_port"} = 1;
-        $conns{"client^v:$v_ip f:$f_ip^$v_port^$p_ip^$p_port"} = 1;
+        $conns{"server^F:$f_ip,V:$v_ip^$v_port^$c_ip^$c_port"} = 1;
+        $conns{"client^F:$f_ip,V:$v_ip^$v_port^$p_ip^$p_port"} = 1;
     }
     return %conns;
 }
@@ -100,7 +101,7 @@ foreach my $connect (keys %conns)
             $report .= '#^#';
         }
     }
-    my $msgbody = "$date$time^tcp^$connect^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^unknow^unknow^^^";
+    my $msgbody = "$date$time^tcp^$connect^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^F5^F5^^^";
     $report .= $msgbody;
 }
 if (length $report > 0)
