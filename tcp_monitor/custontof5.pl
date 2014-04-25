@@ -18,12 +18,12 @@ my $report_port = 31830;
 
 # get version
 #my $version_out = `tmsh show sys version`;
-my $version_out = `~/f5version.sh`;
-my $version = '11.2.1';
-if ($version_out =~ /Version\s+([\d\.]+)/)
-{
-    $version = $1;
-}
+#my $version_out = `~/f5version.sh`;
+#my $version = '11.2.1';
+#if ($version_out =~ /Version\s+([\d\.]+)/)
+#{
+#    $version = $1;
+#}
 
 sub sendUDP 
 {
@@ -44,14 +44,14 @@ sub filter
     my $oneconnect_1;
     foreach my $line (@input)
     {
-        if ($line =~ /(\d+\.\d+\.\d+\.\d+\:\w+)\s+(\d+\.\d+\.\d+\.\d+\:\w+)\s+\d+\.\d+\.\d+\.\d+\:\w+\s+(\d+\.\d+\.\d+\.\d+\:\w+)/){
-            push @output, "$1 $2 $3";
+        if ($line =~ /(\d+\.\d+\.\d+\.\d+\:\w+)\s+(\d+\.\d+\.\d+\.\d+\:\w+)\s+(\d+\.\d+\.\d+\.\d+\:\w+)\s+(\d+\.\d+\.\d+\.\d+\:\w+)/){
+            push @output, "$1 $2 $3 $4";
         }elsif ($line =~ /(\d+\.\d+\.\d+\.\d+\:\w+)[\s\<\-\>]+(\d+\.\d+\.\d+\.\d+\:\w+)[\s\<\-\>]+(\d+\.\d+\.\d+\.\d+\:\w+)/){
-            push @output, "$1 $2 $3";
-        }elsif ($line =~ /any6\.any\s+any6\.any\s+\d+\.\d+\.\d+\.\d+\:\w+\s+(\d+\.\d+\.\d+\.\d+\:\w+)/){
-            $oneconnect_1 = "$1";
+            push @output, "$1 $2 *:* $3";
+        }elsif ($line =~ /any6\.any\s+any6\.any\s+(\d+\.\d+\.\d+\.\d+\:\w+)\s+(\d+\.\d+\.\d+\.\d+\:\w+)/){
+            $oneconnect_1 = "$1 $2";
         }elsif ($line =~ /any6[\s\<\-\>]+\d+\.\d+\.\d+\.\d+\:\w+[\s\<\-\>]+(\d+\.\d+\.\d+\.\d+\:\w+)/){
-            $oneconnect_1 = "$1";
+            $oneconnect_1 = "*:* $1";
         }elsif ($line =~ /(\d+\.\d+\.\d+\.\d+\:\w+)\s+(\d+\.\d+\.\d+\.\d+\:\w+)\s+any6\.any\s+any6\.any/){
             push @output, "$1 $2 $oneconnect_1";
         }elsif ($line =~ /(\d+\.\d+\.\d+\.\d+\:\w+)[\s\<\-\>]+(\d+\.\d+\.\d+\.\d+\:\w+)[\s\<\-\>]+any6/){
@@ -64,7 +64,7 @@ sub filter
 sub get_conns
 {
     # get connect status
-    #my $status = `tmsh show sys connection`;
+    #my @status_out = `tmsh show sys connection`;
     my @status_out = `~/f5.sh`;
     @status_out = &filter(@status_out);
     my %conns;
@@ -73,9 +73,10 @@ sub get_conns
         my @line = split /\s+/, $connect;
         my($c_ip,$c_port) = split /:/, $line[0];
         my($v_ip,$v_port) = split /:/, $line[1];
-        my($p_ip,$p_port) = split /:/, $line[2];
-        $conns{"server^$c_ip^$c_port^$v_ip^$v_port"} = 1;
-        $conns{"client^$v_ip^$v_port^$p_ip^$p_port"} = 1;
+        my($f_ip,$f_port) = split /:/, $line[2];
+        my($p_ip,$p_port) = split /:/, $line[3];
+        $conns{"server^v:$v_ip f:$f_ip^$v_port^$c_ip^$c_port"} = 1;
+        $conns{"client^v:$v_ip f:$f_ip^$v_port^$p_ip^$p_port"} = 1;
     }
     return %conns;
 }
