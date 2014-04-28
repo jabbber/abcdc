@@ -23,8 +23,8 @@ if [[ $? != 0 ]]; then
         echo "add */5 * * * * /openimis/SysChk/bin/check_tcp_monitor.sh to cron"
         echo "*/5 * * * * /openimis/SysChk/bin/check_tcp_monitor.sh" >> $cron_file
     elif [[ $os == 'aix' ]]; then
-        echo "add 0,5,10,15,20,25,30,35,40,45,50,55 /openimis/SysChk/bin/check_tcp_monitor.sh to cron"
-        echo "0,5,10,15,20,25,30,35,40,45,50,55 /openimis/SysChk/bin/check_tcp_monitor.sh" >> $cron_file
+        echo "add 0,5,10,15,20,25,30,35,40,45,50,55 * * * * /openimis/SysChk/bin/check_tcp_monitor.sh to cron"
+        echo "0,5,10,15,20,25,30,35,40,45,50,55 * * * * /openimis/SysChk/bin/check_tcp_monitor.sh" >> $cron_file
     fi
 else
     echo "$cronjob exist"
