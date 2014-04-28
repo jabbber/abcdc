@@ -1,24 +1,27 @@
 #!/usr/bin/env perl
 #author:        zwj@skybility.com
-#version:       1.0.1
+#version:       1.1.0
 #last modfiy:   2014-04-25
 #This script send tcp connect from f5.
 #changelog:
+#1.0.1  支持F5 v10版本通过对比floating IP和vs IP的网段找到floating IP
+#1.1.0  引入Net::OpenSSH远程执行命令获取输出
 
 use strict;
 use warnings;
 use IO::Socket;
 use Time::Local;
-use Sys::Hostname;
-
-my $hostID = hostname;
+use Net::OpenSSH;
 
 my $report_ip = "10.235.128.195";
 my $report_port = 31830;
 
+use FindBin qw($Bin);
+my $host_file = "$Bin/host.cfg";
+my $debug = 1;
+
 # get version
 #my $version_out = `tmsh show sys version`;
-#my $version_out = `~/f5version.sh`;
 #my $version = '11.2.1';
 #if ($version_out =~ /Version\s+([\d\.]+)/)
 #{
@@ -53,6 +56,23 @@ sub ipmask_dec2bin {
     return $result;
 }
 
+sub get_time()
+{
+    my ($sec,$min,$hour,$mday,$mon,$year)=localtime(time);
+    my $report_ts = sprintf("%4d%02s%02s%02d%02d%02d", $year+1900, $mon+1, $mday, $hour, $min, $sec);
+    return $report_ts;
+}
+
+my @err_list;
+sub ssh_cmd()
+{
+    my $ssh = shift;
+    my $cmd = shift;
+    my ($out, $error) = $ssh->capture2($cmd);
+    if ($ssh->error){ push @err_list, "[$cmd] $error";}
+    return $out;
+}
+
 sub sendUDP 
 {
     my $str = shift;
@@ -60,7 +80,8 @@ sub sendUDP
         Proto =>'udp',
         PeerAddr =>$report_ip) || print "socket error!\n";
 
-    print $str."\n";
+    if ($debug){
+        print $str."\n";}
     $s->send("$str") || print "udp send fail!\n";
     close $s;
 }
@@ -69,15 +90,14 @@ sub filter
 {
     my @input = @_;
     my @output;
+
     my $oneconnect_1;
     foreach my $line (@input)
     {
         if ($line =~ /(\d+\.\d+\.\d+\.\d+\:\w+)\s+(\d+\.\d+\.\d+\.\d+\:\w+)\s+(\d+\.\d+\.\d+\.\d+\:\w+)\s+(\d+\.\d+\.\d+\.\d+\:\w+)/){
             push @output, "$1 $2 $3 $4";
         }elsif ($line =~ /(\d+\.\d+\.\d+\.\d+\:\w+)[\s\<\-\>]+(\d+\.\d+\.\d+\.\d+\:\w+)[\s\<\-\>]+(\d+\.\d+\.\d+\.\d+\:\w+)/){
-            my ($v_ip,$v_port) = split /:/, $2;
-            my $f_ip = &float_match($v_ip);
-            push @output, "$1 $2 $f_ip:* $3";
+            push @output, "$1 $2 *:* $3";
         }elsif ($line =~ /any6\.any\s+any6\.any\s+(\d+\.\d+\.\d+\.\d+\:\w+)\s+(\d+\.\d+\.\d+\.\d+\:\w+)/){
             $oneconnect_1 = "$1 $2";
         }elsif ($line =~ /any6[\s\<\-\>]+\d+\.\d+\.\d+\.\d+\:\w+[\s\<\-\>]+(\d+\.\d+\.\d+\.\d+\:\w+)/){
@@ -85,9 +105,7 @@ sub filter
         }elsif ($line =~ /(\d+\.\d+\.\d+\.\d+\:\w+)\s+(\d+\.\d+\.\d+\.\d+\:\w+)\s+any6\.any\s+any6\.any/){
             push @output, "$1 $2 $oneconnect_1";
         }elsif ($line =~ /(\d+\.\d+\.\d+\.\d+\:\w+)[\s\<\-\>]+(\d+\.\d+\.\d+\.\d+\:\w+)[\s\<\-\>]+any6/){
-            my ($v_ip,$v_port) = split /:/, $2;
-            my $f_ip = &float_match($v_ip);
-            push @output, "$1 $2 $f_ip:* $oneconnect_1";
+            push @output, "$1 $2 *:* $oneconnect_1";
         }
     }
     return @output;
@@ -98,12 +116,13 @@ my %vfmap;
 sub float_match
 {
     my $v_ip = shift;
+    my $ssh = shift;
     if (exists $vfmap{$v_ip}){
         return $vfmap{$v_ip};
     }else{
         if(%vlans == 0){
-            #my @float_out = `b self`;
-            my $float_out = `~/f5ip.sh`;
+            #my $float_out = &ssh_cmd($ssh,'~/f5ip.sh');
+            my $float_out = &ssh_cmd($ssh,'b self');
             my @floats = split /\n(?=[^\|])/, $float_out;
             foreach my $line (@floats)
             {
@@ -144,50 +163,84 @@ sub float_match
 
 sub get_conns
 {
+    my $ssh = shift;
     # get connect status
-    my @status_out = `~/f5.sh`;
-    #my @status_out = `tmsh show sys connection`;
+    #my @connects = &ssh_cmd($ssh,'~/f5.sh');
+    my @connects = &ssh_cmd($ssh,'tmsh show sys connection');
+    @connects = &filter(@connects);
 
-    @status_out = &filter(@status_out);
     my %conns;
-    foreach my $connect (@status_out)
+    %vlans = ();
+    %vfmap = ();
+    foreach my $connect (@connects)
     {
         my @line = split /\s+/, $connect;
         my($c_ip,$c_port) = split /:/, $line[0];
         my($v_ip,$v_port) = split /:/, $line[1];
         my($f_ip,$f_port) = split /:/, $line[2];
         my($p_ip,$p_port) = split /:/, $line[3];
+        if ($f_ip eq '*')
+        {
+            $f_ip = &float_match($v_ip,$ssh);
+        }
         $conns{"server^F:$f_ip,V:$v_ip^$v_port^$c_ip^$c_port"} = 1;
         $conns{"client^F:$f_ip,V:$v_ip^$v_port^$p_ip^$p_port"} = 1;
     }
     return %conns;
 }
 
-my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
-my $date = sprintf("%04d%02d%02d",$year+1900,$mon+1,$mday);
-my $time = sprintf("%02d%02d%02d",$hour,$min,$sec);
 
-my $msghead = "SYSTEMLOG|TCPNETSTAT|$hostID|";
-my $report = '';
-my %conns = &get_conns;
-foreach my $connect (keys %conns)
-{
-    if (length $report > 0)
+sub main{
+    open HST, $host_file or die "can't open the file $!";
+    while (<HST>)
     {
-        if (length $report > 3500)
+        if(/^\s*#/){ next; }
+        my @hs_info = split(/\s+/, $_);
+        my $h_ip = $hs_info[0];
+        my $h_user = $hs_info[1];
+        my $h_pass = $hs_info[2];
+        my $report_ts = &get_time;
+        my $ssh = Net::OpenSSH -> new($h_ip, user => $h_user, passwd => $h_pass);
+        if($ssh->error)
+        {
+            print "$report_ts host $h_ip Couldn't establish SSH connection: ". $ssh->error;
+            next;
+        }
+        @err_list = ();
+        #my $hostID = &ssh_cmd($ssh, "hostname");
+        my $hostID = &ssh_cmd($ssh, "bigpipe system hostname");
+        chomp $hostID;
+        
+        my $msghead = "SYSTEMLOG|TCPNETSTAT|$hostID|";
+        my $report = '';
+        my %conns = &get_conns($ssh);
+        foreach my $connect (keys %conns)
+        {
+            if (length $report > 0)
+            {
+                if (length $report > 3500)
+                {
+                    &sendUDP($msghead.$report);
+                    $report = '';
+                }else{
+                    $report .= '#^#';
+                }
+            }
+            my $msgbody = "$report_ts^tcp^$connect^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^F5^customtof5^^^";
+            $report .= $msgbody;
+        }
+        if (length $report > 0)
         {
             &sendUDP($msghead.$report);
-            $report = '';
-        }else{
-            $report .= '#^#';
         }
+
+        foreach (@err_list)
+        {
+            print "$report_ts host $h_ip remote command failed: $_";
+        }
+
     }
-    my $msgbody = "$date$time^tcp^$connect^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^F5^customtof5^^^";
-    $report .= $msgbody;
-}
-if (length $report > 0)
-{
-    &sendUDP($msghead.$report);
 }
 
+&main;
 print "\n";
