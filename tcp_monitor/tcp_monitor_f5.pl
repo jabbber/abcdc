@@ -12,9 +12,12 @@ use warnings;
 use IO::Socket;
 use Time::Local;
 use Net::OpenSSH;
+use POSIX 'setsid';
 
 my $report_ip = "10.235.128.195";
 my $report_port = 31830;
+
+my $refresh_rate = 300;
 
 use FindBin qw($Bin);
 my $host_file = "$Bin/host.cfg";
@@ -203,7 +206,7 @@ sub main{
         my $ssh = Net::OpenSSH -> new($h_ip, user => $h_user, passwd => $h_pass);
         if($ssh->error)
         {
-            print "$report_ts host $h_ip Couldn't establish SSH connection: ". $ssh->error;
+            print "$report_ts host $h_ip Couldn't establish SSH connection: ". $ssh->error . "\n";
             next;
         }
         @err_list = ();
@@ -242,5 +245,60 @@ sub main{
     }
 }
 
-&main;
-print "\n";
+if (!exists $ARGV[0])
+{
+    &main;
+}
+elsif ($ARGV[0] eq '-d')
+{
+    print "start as daemon...\n\n";
+    #------------------------------
+    # create daemon process
+    exit if fork;
+
+    &setsid();
+
+    # fork() again so the parent (session group leader) can exit.
+    exit if fork;
+
+    # chdir('/') to ensure our daemon doesn't keep any directory in use.
+    chdir '/';
+
+    # ignore SIGCHLD signal to avoid zombie processes
+    $SIG{CHLD} = 'IGNORE';
+    $SIG{'INT'}  = 'IGNORE';
+    $SIG{'QUIT'} = 'IGNORE';
+    $SIG{'ALRM'} = 'IGNORE';
+    $SIG{'ILL'}  = 'IGNORE';
+    $SIG{'ABRT'} = 'IGNORE';
+    $SIG{'FPE'}  = 'IGNORE';
+    $SIG{'SEGV'} = 'IGNORE';
+    $SIG{'TERM'} = 'IGNORE';
+    $SIG{'BUS'}  = 'IGNORE';
+    $SIG{'SYS'}  = 'IGNORE';
+    $SIG{'XCPU'} = 'IGNORE';
+    $SIG{'XFSZ'} = 'IGNORE';
+    $SIG{'IOT'}  = 'IGNORE';
+    $SIG{'PIPE'} = 'IGNORE';
+    $SIG{'HUP'}  = 'IGNORE';
+
+    # start main loop.
+    my $pid = fork;
+    if ($pid == 0)
+    {
+        exit;
+    }
+    else
+    {
+        while(1) {
+            &main;
+            sleep $refresh_rate;
+        }
+    }
+}
+else
+{
+    print "usage:\n";
+    print "    -d          start as daemon\n";
+    exit;
+}
