@@ -1,11 +1,12 @@
 #!/usr/bin/env perl
 #author:        zwj@skybility.com
-#version:       1.1.0
-#last modfiy:   2014-04-25
+#version:       1.1.1
+#last modfiy:   2014-04-30
 #This script send tcp connect from f5.
 #changelog:
 #1.0.1  支持F5 v10版本通过对比floating IP和vs IP的网段找到floating IP
 #1.1.0  引入Net::OpenSSH远程执行命令获取输出
+#1.1.1  去掉所有带any的链接信息，修复主机名问题，修复f5tocustom和client对方端口没有置空的问题
 
 use strict;
 use warnings;
@@ -101,14 +102,6 @@ sub filter
             push @output, "$1 $2 $3 $4";
         }elsif ($line =~ /(\d+\.\d+\.\d+\.\d+\:\w+)[\s\<\-\>]+(\d+\.\d+\.\d+\.\d+\:\w+)[\s\<\-\>]+(\d+\.\d+\.\d+\.\d+\:\w+)/){
             push @output, "$1 $2 *:* $3";
-        }elsif ($line =~ /any6\.any\s+any6\.any\s+(\d+\.\d+\.\d+\.\d+\:\w+)\s+(\d+\.\d+\.\d+\.\d+\:\w+)/){
-            $oneconnect_1 = "$1 $2";
-        }elsif ($line =~ /any6[\s\<\-\>]+\d+\.\d+\.\d+\.\d+\:\w+[\s\<\-\>]+(\d+\.\d+\.\d+\.\d+\:\w+)/){
-            $oneconnect_1 = "$1";
-        }elsif ($line =~ /(\d+\.\d+\.\d+\.\d+\:\w+)\s+(\d+\.\d+\.\d+\.\d+\:\w+)\s+any6\.any\s+any6\.any/){
-            push @output, "$1 $2 $oneconnect_1";
-        }elsif ($line =~ /(\d+\.\d+\.\d+\.\d+\:\w+)[\s\<\-\>]+(\d+\.\d+\.\d+\.\d+\:\w+)[\s\<\-\>]+any6/){
-            push @output, "$1 $2 *:* $oneconnect_1";
         }
     }
     return @output;
@@ -124,8 +117,8 @@ sub float_match
         return $vfmap{$v_ip};
     }else{
         if(%vlans == 0){
-            #my $float_out = &ssh_cmd($ssh,'~/f5ip.sh');
-            my $float_out = &ssh_cmd($ssh,'b self');
+            my $float_out = &ssh_cmd($ssh,'~/f5ip.sh');
+            #my $float_out = &ssh_cmd($ssh,'b self');
             my @floats = split /\n(?=[^\|])/, $float_out;
             foreach my $line (@floats)
             {
@@ -168,8 +161,9 @@ sub get_conns
 {
     my $ssh = shift;
     # get connect status
-    #my @connects = &ssh_cmd($ssh,'~/f5.sh');
-    my @connects = &ssh_cmd($ssh,'tmsh show sys connection');
+    my $ssh_out = &ssh_cmd($ssh,'~/f5.sh');
+    #my $ssh_out = &ssh_cmd($ssh,'b conn show');
+    my @connects = split /\n/, $ssh_out;
     @connects = &filter(@connects);
 
     my %conns;
@@ -186,7 +180,7 @@ sub get_conns
         {
             $f_ip = &float_match($v_ip,$ssh);
         }
-        $conns{"server^F:$f_ip,V:$v_ip^$v_port^$c_ip^$c_port"} = 1;
+        $conns{"server^F:$f_ip,V:$v_ip^$v_port^$c_ip^"} = 1;
         $conns{"client^F:$f_ip,V:$v_ip^$v_port^$p_ip^$p_port"} = 1;
     }
     return %conns;
@@ -210,10 +204,11 @@ sub main{
             next;
         }
         @err_list = ();
-        #my $hostID = &ssh_cmd($ssh, "hostname");
-        my $hostID = &ssh_cmd($ssh, "bigpipe system hostname");
-        chomp $hostID;
-        
+        my $hostID = &ssh_cmd($ssh, "~/f5name.sh");
+        #my $hostID = &ssh_cmd($ssh, "bigpipe system hostname");
+        $hostID =~ /Local Host Name:\s+([\w\-\_]+)\.?.*$/;
+        $hostID = $1;        
+
         my $msghead = "SYSTEMLOG|TCPNETSTAT|$hostID|";
         my $report = '';
         my %conns = &get_conns($ssh);
@@ -229,7 +224,12 @@ sub main{
                     $report .= '#^#';
                 }
             }
-            my $msgbody = "$report_ts^tcp^$connect^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^F5^customtof5^^^";
+            my $app_name = "f5tocustom";
+            if ($connect =~ /server/)
+            {
+                $app_name = "customtof5";
+            }
+            my $msgbody = "$report_ts^tcp^$connect^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^-1^F5^$app_name^^^";
             $report .= $msgbody;
         }
         if (length $report > 0)
