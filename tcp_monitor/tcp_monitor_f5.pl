@@ -196,10 +196,6 @@ sub main{
             next;
         }
         @err_list = ();
-        #my $hostID = &ssh_cmd($ssh, "~/f5name.sh");
-        my $hostID = &ssh_cmd($ssh, "bigpipe system hostname");
-        $hostID =~ /Local Host Name:\s+([\w\-\_]+)\.?.*$/;
-        $hostID = $1;
 
         # get version
         #my $version_out = &ssh_cmd($ssh, '~/f5version.sh');
@@ -216,9 +212,15 @@ sub main{
         }
         my @versions = split /\./, $version;
 
+        my $hostID = '';
         my $conn_out = '';
         if ($versions[0] == 10)
         {
+            #my$host_out = &ssh_cmd($ssh, "~/f5name.sh");
+            my $host_out = &ssh_cmd($ssh, "bigpipe system hostname");
+            if ($host_out =~ /Local Host Name:\s+([\w\-\_]+)\.?.*/){
+                $hostID = $1;
+            }
             #$conn_out = &ssh_cmd($ssh,'~/f5.sh');
             $conn_out = &ssh_cmd($ssh,'b conn show -n');
             #my $selfip_out = &ssh_cmd($ssh,'~/f5ip.sh');
@@ -227,6 +229,12 @@ sub main{
         }
         elsif ($versions[0] == 11)
         {
+            #my$host_out = &ssh_cmd($ssh, "~/f5name.sh");
+            my $host_out = &ssh_cmd($ssh, "tmsh list sys global-settings hostname");
+            if ($host_out =~ /hostname\s+([\w+\-\_]+)\.?.*/){
+                $hostID = $1;
+            }
+            #$conn_out = &ssh_cmd($ssh,'~/f5.sh');
             $conn_out = &ssh_cmd($ssh,'tmsh show sys connection');
         }
         else
