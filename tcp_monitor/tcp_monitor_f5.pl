@@ -1,12 +1,13 @@
 #!/usr/bin/env perl
 #author:        zwj@skybility.com
-#version:       1.1.1
-#last modfiy:   2014-04-30
+#version:       1.1.2
+#last modfiy:   2014-05-01
 #This script send tcp connect from f5.
 #changelog:
 #1.0.1  支持F5 v10版本通过对比floating IP和vs IP的网段找到floating IP
 #1.1.0  引入Net::OpenSSH远程执行命令获取输出
 #1.1.1  去掉所有带any的链接信息，修复主机名问题，修复f5tocustom和client对方端口没有置空的问题
+#1.1.2  强制先检测版本,不支持的版本將报错并跳过
 
 use strict;
 use warnings;
@@ -23,14 +24,6 @@ my $refresh_rate = 300;
 use FindBin qw($Bin);
 my $host_file = "$Bin/host.cfg";
 my $debug = 1;
-
-# get version
-#my $version_out = `tmsh show sys version`;
-#my $version = '11.2.1';
-#if ($version_out =~ /Version\s+([\d\.]+)/)
-#{
-#    $version = $1;
-#}
 
 #### 将十进制数转换成8为二进制
 sub dectobin {
@@ -108,43 +101,43 @@ sub filter
 }
 
 my %vlans;
+sub vlans_init
+{
+    my $selfip_out = shift;
+    my @floats = split /\n(?=[^\|])/, $selfip_out;
+    foreach my $line (@floats)
+    {
+        if ($line =~ /^SELF\s+(\d+\.\d+\.\d+\.\d+)/)
+        {
+            my $ip = $1;
+            $line =~ /mask\s+(\d+\.\d+\.\d+\.\d+)/;
+            my $mask = $1;
+            $line =~ /VLAN\s+(\w+)/;
+            my $vlan = $1;
+            my $floating;
+            if ($line =~ /floating enable/)
+            {
+                $floating=1;
+            }else{
+                $floating=0;
+            }
+            if (!exists $vlans{$vlan})
+            {
+                $vlans{$vlan} = {'ip' => $ip, 'mask' => $mask, 'floating' => $floating};
+            }elsif($floating == 1 and $vlans{$vlan}{'floating'} == 0){
+                $vlans{$vlan} = {'ip' => $ip, 'mask' => $mask, 'floating' => $floating};
+            }
+        }
+    }
+}
+
 my %vfmap;
 sub float_match
 {
     my $v_ip = shift;
-    my $ssh = shift;
     if (exists $vfmap{$v_ip}){
         return $vfmap{$v_ip};
     }else{
-        if(%vlans == 0){
-            my $float_out = &ssh_cmd($ssh,'~/f5ip.sh');
-            #my $float_out = &ssh_cmd($ssh,'b self');
-            my @floats = split /\n(?=[^\|])/, $float_out;
-            foreach my $line (@floats)
-            {
-                if ($line =~ /^SELF\s+(\d+\.\d+\.\d+\.\d+)/)
-                {
-                    my $ip = $1;
-                    $line =~ /mask\s+(\d+\.\d+\.\d+\.\d+)/;
-                    my $mask = $1;
-                    $line =~ /VLAN\s+(\w+)/;
-                    my $vlan = $1;
-                    my $floating;
-                    if ($line =~ /floating enable/)
-                    {
-                        $floating=1;
-                    }else{
-                        $floating=0;
-                    }
-                    if (!exists $vlans{$vlan})
-                    {
-                        $vlans{$vlan} = {'ip' => $ip, 'mask' => $mask, 'floating' => $floating};
-                    }elsif($floating == 1 and $vlans{$vlan}{'floating'} == 0){
-                        $vlans{$vlan} = {'ip' => $ip, 'mask' => $mask, 'floating' => $floating};
-                    }
-                }
-            }
-        }
         foreach my $vlan (keys %vlans)
         {
             if ((&ipmask_dec2bin($vlans{$vlan}{'ip'}) & &ipmask_dec2bin($vlans{$vlan}{'mask'})) eq (&ipmask_dec2bin($v_ip) & &ipmask_dec2bin($vlans{$vlan}{'mask'})))
@@ -159,16 +152,12 @@ sub float_match
 
 sub get_conns
 {
-    my $ssh = shift;
+    my $conn_out = shift;
     # get connect status
-    my $ssh_out = &ssh_cmd($ssh,'~/f5.sh');
-    #my $ssh_out = &ssh_cmd($ssh,'b conn show');
-    my @connects = split /\n/, $ssh_out;
+    my @connects = split /\n/, $conn_out;
     @connects = &filter(@connects);
 
     my %conns;
-    %vlans = ();
-    %vfmap = ();
     foreach my $connect (@connects)
     {
         my @line = split /\s+/, $connect;
@@ -178,7 +167,7 @@ sub get_conns
         my($p_ip,$p_port) = split /:/, $line[3];
         if ($f_ip eq '*')
         {
-            $f_ip = &float_match($v_ip,$ssh);
+            $f_ip = &float_match($v_ip);
         }
         $conns{"server^F:$f_ip,V:$v_ip^$v_port^$c_ip^"} = 1;
         $conns{"client^F:$f_ip,V:$v_ip^$v_port^$p_ip^$p_port"} = 1;
@@ -191,6 +180,8 @@ sub main{
     open HST, $host_file or die "can't open the file $!";
     while (<HST>)
     {
+        %vlans = ();
+        %vfmap = ();
         if(/^\s*#/){ next; }
         my @hs_info = split(/\s+/, $_);
         my $h_ip = $hs_info[0];
@@ -207,11 +198,41 @@ sub main{
         my $hostID = &ssh_cmd($ssh, "~/f5name.sh");
         #my $hostID = &ssh_cmd($ssh, "bigpipe system hostname");
         $hostID =~ /Local Host Name:\s+([\w\-\_]+)\.?.*$/;
-        $hostID = $1;        
+        $hostID = $1;
+
+        # get version
+        my $version_out = &ssh_cmd($ssh, '~/f5version.sh');
+        #my $version_out = &ssh_cmd($ssh, 'tmsh show sys version');
+        my $version = '';
+        if ($version_out =~ /Version\s+([\d\.]+)/)
+        {
+            $version = $1;
+        }
+        if (! $version)
+        {
+            print "$report_ts host $h_ip :This OS isn't F5.\n";
+            next;
+        }
+        my @versions = split /\./, $version;
+
+        my $conn_out = '';
+        if ($versions[0] == 10)
+        {
+            $conn_out = &ssh_cmd($ssh,'~/f5.sh');
+            #my $conn_out = &ssh_cmd($ssh,'b conn show');
+            my $selfip_out = &ssh_cmd($ssh,'~/f5ip.sh');
+            #my $selfip_out = &ssh_cmd($ssh,'b self');
+            &vlans_init($selfip_out);
+        }
+        else
+        {
+            print "$report_ts host $h_ip :F5 Version $version do not support.\n";
+            next;
+        }
 
         my $msghead = "SYSTEMLOG|TCPNETSTAT|$hostID|";
         my $report = '';
-        my %conns = &get_conns($ssh);
+        my %conns = &get_conns($conn_out);
         foreach my $connect (keys %conns)
         {
             if (length $report > 0)
