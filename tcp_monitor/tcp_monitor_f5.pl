@@ -92,6 +92,7 @@ sub filter
     foreach my $line (@input)
     {
         if ($line =~ /(\d+\.\d+\.\d+\.\d+\:\w+)\s+(\d+\.\d+\.\d+\.\d+\:\w+)\s+(\d+\.\d+\.\d+\.\d+\:\w+)\s+(\d+\.\d+\.\d+\.\d+\:\w+)/){
+            if ($1 eq $3 and $2 eq $4){next;}
             push @output, "$1 $2 $3 $4";
         }elsif ($line =~ /(\d+\.\d+\.\d+\.\d+\:\w+)[\s\<\-\>]+(\d+\.\d+\.\d+\.\d+\:\w+)[\s\<\-\>]+(\d+\.\d+\.\d+\.\d+\:\w+)/){
             push @output, "$1 $2 *:* $3";
@@ -219,10 +220,14 @@ sub main{
         if ($versions[0] == 10)
         {
             #$conn_out = &ssh_cmd($ssh,'~/f5.sh');
-            $conn_out = &ssh_cmd($ssh,'b conn show');
+            $conn_out = &ssh_cmd($ssh,'b conn show -n');
             #my $selfip_out = &ssh_cmd($ssh,'~/f5ip.sh');
             my $selfip_out = &ssh_cmd($ssh,'b self');
             &vlans_init($selfip_out);
+        }
+        elsif ($versions[0] == 11)
+        {
+            $conn_out = &ssh_cmd($ssh,'tmsh show sys connection');
         }
         else
         {
