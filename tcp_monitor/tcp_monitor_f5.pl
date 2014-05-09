@@ -218,7 +218,7 @@ sub main{
         {
             #my$host_out = &ssh_cmd($ssh, "~/f5name.sh");
             my $host_out = &ssh_cmd($ssh, "bigpipe system hostname");
-            if ($host_out =~ /Local Host Name:\s+([\w\-\_]+)\.?.*/){
+            if ($host_out =~ /Local Host Name:\s+([\w\-\_\.]+)/){
                 $hostID = $1;
             }
             #$conn_out = &ssh_cmd($ssh,'~/f5.sh');
@@ -231,7 +231,7 @@ sub main{
         {
             #my$host_out = &ssh_cmd($ssh, "~/f5name.sh");
             my $host_out = &ssh_cmd($ssh, "tmsh list sys global-settings hostname");
-            if ($host_out =~ /hostname\s+([\w+\-\_]+)\.?.*/){
+            if ($host_out =~ /hostname\s+([\w+\-\_\.]+)/){
                 $hostID = $1;
             }
             #$conn_out = &ssh_cmd($ssh,'~/f5.sh');
