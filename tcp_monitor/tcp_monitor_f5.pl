@@ -1,13 +1,14 @@
 #!/usr/bin/env perl
 #author:        zwj@skybility.com
-#version:       1.1.2
-#last modfiy:   2014-05-01
+#version:       1.1.3
+#last modfiy:   2014-05-14
 #This script send tcp connect from f5.
 #changelog:
 #1.0.1  支持F5 v10版本通过对比floating IP和vs IP的网段找到floating IP
 #1.1.0  引入Net::OpenSSH远程执行命令获取输出
 #1.1.1  去掉所有带any的链接信息，修复主机名问题，修复f5tocustom和client对方端口没有置空的问题
 #1.1.2  强制先检测版本,不支持的版本將报错并跳过
+#1.1.3  client和floating ip相同，vs和pool相同，vs和floating相同，没有匹配到floating ip的特殊条目都将被忽略
 
 use strict;
 use warnings;
@@ -92,7 +93,6 @@ sub filter
     foreach my $line (@input)
     {
         if ($line =~ /(\d+\.\d+\.\d+\.\d+\:\w+)\s+(\d+\.\d+\.\d+\.\d+\:\w+)\s+(\d+\.\d+\.\d+\.\d+\:\w+)\s+(\d+\.\d+\.\d+\.\d+\:\w+)/){
-            if ($1 eq $3 and $2 eq $4){next;}
             push @output, "$1 $2 $3 $4";
         }elsif ($line =~ /(\d+\.\d+\.\d+\.\d+\:\w+)[\s\<\-\>]+(\d+\.\d+\.\d+\.\d+\:\w+)[\s\<\-\>]+(\d+\.\d+\.\d+\.\d+\:\w+)/){
             push @output, "$1 $2 *:* $3";
@@ -158,7 +158,7 @@ sub get_conns
     my @connects = split /\n/, $conn_out;
     @connects = &filter(@connects);
 
-    my %conns;
+    my @conns;
     foreach my $connect (@connects)
     {
         my @line = split /\s+/, $connect;
@@ -170,10 +170,11 @@ sub get_conns
         {
             $f_ip = &float_match($v_ip);
         }
-        $conns{"server^F:$f_ip,V:$v_ip^$v_port^$c_ip^"} = 1;
-        $conns{"client^F:$f_ip,V:$v_ip^$v_port^$p_ip^$p_port"} = 1;
+        if ($c_ip eq $f_ip or $v_ip eq $p_ip or $v_ip eq $f_ip or $f_ip eq '*'){next;}
+        push @conns, "server^F:$f_ip,V:$v_ip^$v_port^$c_ip^";
+        push @conns, "client^F:$f_ip,V:$v_ip^$v_port^$p_ip^$p_port";
     }
-    return %conns;
+    return @conns;
 }
 
 
@@ -245,8 +246,8 @@ sub main{
 
         my $msghead = "SYSTEMLOG|TCPNETSTAT|$hostID|";
         my $report = '';
-        my %conns = &get_conns($conn_out);
-        foreach my $connect (keys %conns)
+        my @conns = &get_conns($conn_out);
+        foreach my $connect (@conns)
         {
             if (length $report > 0)
             {
