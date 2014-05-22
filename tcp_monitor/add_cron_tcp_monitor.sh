@@ -22,7 +22,7 @@ case "$os" in
 esac
 
 if [[ -f $cron_file && -w $cron_file && -r $cron_file ]]; then
-    touch $cron_file
+    cp $cron_file $cron_file.bak
 else
     echo "Error: can not read and write $cron_file ."
     exit 1
