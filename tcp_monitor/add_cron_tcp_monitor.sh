@@ -22,7 +22,9 @@ case "$os" in
 esac
 
 if [[ -f $cron_file && -w $cron_file && -r $cron_file ]]; then
-    cp $cron_file $cron_file.bak
+    backup=/tmp/root.crontab-`date +%Y%m%d%H%M%S|tr -d '\n'`.bak
+    echo "backup crontab to $backup"
+    cp $cron_file $backup
 else
     echo "Error: can not read and write $cron_file ."
     exit 1
