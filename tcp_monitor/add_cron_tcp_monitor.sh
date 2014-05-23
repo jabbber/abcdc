@@ -62,7 +62,17 @@ else
 fi
 
 #import tmp to crontab
-if [[ $modify == 1 ]];then
+if [[ $modify == 1 ]]; then
+    grep -e "/openimis/SysChk/bin/check_tcp_monitor.sh" $cron_file
+    if [[ $? != 0 ]]; then
+        echo "add crontab failed!"
+        exit 1
+    fi
+    grep -e "/openimis/SysChk/bin/restart_tcp_monitor.sh" $cron_file
+    if [[ $? != 0 ]]; then
+        echo "add crontab failed!"
+        exit 1
+    fi
     echo "reload crontab"
     case "$os" in
         Linux)
@@ -78,6 +88,7 @@ if [[ $modify == 1 ]];then
             exit 1
         ;;
     esac
+    crontab -l
 else
     echo "crontab have not change"
 fi
