@@ -1,4 +1,3 @@
-#!/usr/bin/env sh
 WORKDIR=/openimis/SysChk
 LOGFILE=$WORKDIR/log/check_tcp_monitor.log
 cd $WORKDIR/bin

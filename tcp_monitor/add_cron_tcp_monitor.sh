@@ -1,4 +1,3 @@
-#!/usr/bin/env sh
 
 os=`uname|tr -d '\n'`
 user=`whoami|tr -d '\n'`
