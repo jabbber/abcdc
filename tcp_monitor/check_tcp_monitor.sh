@@ -1,5 +1,5 @@
 WORKDIR=/openimis/SysChk
-LOGFILE=$WORKDIR/log/check_tcp_monitor.log
+LOGFILE=$WORKDIR/log/tcp_monitor_check.log
 cd $WORKDIR/bin
 
 procNum=`ps -ef|grep perl|grep tcp_monitor.pl|grep root|grep -v grep|wc -l`

@@ -1,11 +1,11 @@
 WORKDIR=/openimis/SysChk
-LOGFILE=$WORKDIR/log/check_tcp_monitor.log
+LOGFILE=$WORKDIR/log/tcp_monitor_check.log
 
 yesterday=$(perl -e "use POSIX qw(strftime); print strftime '%Y%m%d' , localtime( time()-3600*24) ")
-cp $LOGFILE $WORKDIR/check/check_tcp_monitor_${yesterday}.log
+cp $LOGFILE $WORKDIR/tcp_monitor_check.log.$yesterday
 echo "" > $LOGFILE
 
-find $WORKDIR/check -mtime +10 -name "check_tcp_monitor_*.log" -exec rm -f {} \;
+find $WORKDIR/log -mtime +10 -name "tcp_monitor_*.log.*" -exec rm -f {} \;
 
 cd $WORKDIR/bin
 

@@ -25,7 +25,7 @@
 #    1.4.3 改为用Time::Local模块计算时间（兼容更多发行版）
 #    1.4.4 修复aix上把server端连接当成client端的问题
 #    1.4.5 把判断为client的端口也记录并输出到连接信息里
-#    1.4.6 增加一个异常日志文件
+#    1.4.6 增加一个异常日志文件,日志文件改为每天生成一个
 
 use strict;
 use warnings;
@@ -41,7 +41,7 @@ my $cfg_file = "$Bin/../etc/tcp_monitor.conf";
 
 # debug开关，debug日志文件名
 my $debug = 1;
-my $debuglog = "$Bin/tcp_monitor.log";
+my $debuglog = "$Bin/tcp_monitor_debug.log";
 
 my $errorlog = "$Bin/tcp_monitor_error.log";
 
@@ -527,13 +527,13 @@ sub do_check
     my %tcp_map = &report_data(@stats);
     if ($debug){
         use Data::Dumper;
-        open LOG, ">>$debuglog" || print "open $debuglog file error!\n";
+        open LOG, ">>$debuglog.$date" || print "open $debuglog.$date file error!\n";
         print LOG "时间:$date $time\n";
         #print LOG "数据采集:\n";
         #print LOG Dumper(%conns);
         #print Dumper(%tcp_map);
     }
-    open ERR, ">>$errorlog" || print "open $errorlog file error!\n";
+    open ERR, ">>$errorlog.$date" || print "open $errorlog.$date file error!\n";
     #生成统计报文
     if ($report_switch){
         my $msghead = "SYSTEMLOG|TCPNETSTAT|$hostID|";
