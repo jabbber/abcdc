@@ -1,6 +1,7 @@
 WORKDIR=/openimis/SysChk
-today=$(perl -e "use POSIX qw(strftime); print strftime '%Y%m%d' , localtime( time()-3600*24) ")
+today=$(date +%Y%m%d)
 LOGFILE=$WORKDIR/log/tcp_monitor_check.log.$today
+
 cd $WORKDIR/bin
 
 procNum=`ps -ef|grep perl|grep tcp_monitor.pl|grep root|grep -v grep|wc -l`
