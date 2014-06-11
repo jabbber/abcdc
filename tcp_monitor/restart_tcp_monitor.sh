@@ -1,9 +1,6 @@
 WORKDIR=/openimis/SysChk
-LOGFILE=$WORKDIR/log/tcp_monitor_check.log
-
-yesterday=$(perl -e "use POSIX qw(strftime); print strftime '%Y%m%d' , localtime( time()-3600*24) ")
-cp $LOGFILE $WORKDIR/tcp_monitor_check.log.$yesterday
-echo "" > $LOGFILE
+today=$(perl -e "use POSIX qw(strftime); print strftime '%Y%m%d' , localtime( time()-3600*24) ")
+LOGFILE=$WORKDIR/log/tcp_monitor_check.log.$today
 
 find $WORKDIR/log -mtime +10 -name "tcp_monitor_*.log.*" -exec rm -f {} \;
 
