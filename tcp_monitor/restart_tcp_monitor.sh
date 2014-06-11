@@ -1,5 +1,12 @@
 WORKDIR=/openimis/SysChk
 LOGFILE=$WORKDIR/log/check_tcp_monitor.log
+
+yesterday=$(perl -e "use POSIX qw(strftime); print strftime '%Y%m%d' , localtime( time()-3600*24) ")
+cp $LOGFILE $WORKDIR/check/check_tcp_monitor_${yesterday}.log
+echo "" > $LOGFILE
+
+find $WORKDIR/check -mtime +10 -name "check_tcp_monitor_*.log" -exec rm -f {} \;
+
 cd $WORKDIR/bin
 
   date >> $LOGFILE
@@ -13,10 +20,3 @@ cd $WORKDIR/bin
   echo "restart tcp_monitor end" >>$LOGFILE
   ps -ef|grep perl|grep tcp_monitor.pl|grep root|grep -v grep >>$LOGFILE
 
-#let "oldd=$(date +%s) - 10 * 24 * 3600"
-#oldday=$(date --date="@$oldd" +"%a %b %e")
-oldday=$(perl -e "use POSIX qw(strftime); print strftime '%a %b %e' , localtime( time()-3600*24*10) ")
-let "linenum=$(grep -n -e "$oldday" $LOGFILE|head -1|cut -d: -f1) -1"
-if [[ $linenum > 0 ]];then
-    sed -e "1,${linenum}d" -i $LOGFILE
-fi
