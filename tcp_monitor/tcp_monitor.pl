@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 #author:        zwj@skybility.com
-#version:       1.4.4
-#last modfiy:   2014-04-24
+#version:       1.4.5
+#last modfiy:   2014-06-11
 #This script is tcp status from netstat and alarm when it is over threshold.
 #changelog:
 #    0.1 tcp连接状态计数监控脚本
@@ -24,6 +24,7 @@
 #    1.4.2 添加单次运行的功能，使用 -c 参数指定运行次数
 #    1.4.3 改为用Time::Local模块计算时间（兼容更多发行版）
 #    1.4.4 修复aix上把server端连接当成client端的问题
+#    1.4.5 把判断为client的端口也记录并输出到连接信息里
 
 use strict;
 use warnings;
@@ -32,7 +33,7 @@ use POSIX 'setsid';
 use Time::Local;
 
 # 刷新间隔
-my $_refresh_rate = 5; #Refresh rate of the netstat data
+my $_refresh_rate = 300; #Refresh rate of the netstat data
 
 use FindBin qw($Bin);
 my $cfg_file = "$Bin/tcp_monitor.conf";
@@ -88,7 +89,6 @@ my $os = $^O;
 my $os_linux = 'linux';
 my $os_win = 'MSWin32';
 my $os_aix = 'aix';
-
 
 my $tcp_at = 0;
 my $tcp_recv_at = 1;
@@ -242,12 +242,14 @@ sub report_data
         #decide side
         my $side = 'server';
         $line[$local_address_at] =~ /(\d+)$/;
-        my $port = $1;
+        my $l_port = $1;
+        $line[$foreign_address_at] =~ /(\d+)$/;
+        my $f_port = $1;
+        my $port = $l_port;
         if (! exists $l_port{$port} and ! exists $l_port{$line[$local_address_at]})
         {
             $side = 'client';
-            $line[$foreign_address_at] =~ /(\d+)$/;
-            $port = $1;
+            $port = $f_port;
         }
 
         #create hash
@@ -274,6 +276,9 @@ sub report_data
                 'UNKNOWN' => 0,
                 'pid' => 0
             };
+            $tcp_map{"$side^$port^$lip^$fip"}{'f_port'} = $f_port;
+            $tcp_map{"$side^$port^$lip^$fip"}{'l_port'} = $l_port;
+            
             if ($os eq $os_win)
             {
                 $tcp_map{"$side^$port^$lip^$fip"}{'pid'} = $line[6];
@@ -316,7 +321,7 @@ sub get_name
                 }
                 else
                 {
-                    print 'Warning: not found lsof in /openimis/SysChk/bin/lsof ';
+                    print "Warning: not found lsof in /openimis/SysChk/bin/lsof\n";
                     return $comlist{$conn};
                 }
             }
@@ -547,9 +552,9 @@ sub do_check
             my $address;
             if ($side eq 'server')
             {
-                $address = "$side^$lip^$port^$fip^";
+                $address = "$side^$lip^$port^$fip^$tcp_map{$conn}{'f_port'}";
             }else{
-                $address = "$side^$lip^^$fip^$port";
+                $address = "$side^$lip^$tcp_map{$conn}{'l_port'}^$fip^$port";
             }
             my $msgbody = "$date$time^tcp^$address^$tcp_map{$conn}{'recvq'}^$tcp_map{$conn}{'sendq'}^$tcp_map{$conn}{'ESTABLISHED'}^$tcp_map{$conn}{'TIME_WAIT'}^$tcp_map{$conn}{'CLOSE_WAIT'}^$tcp_map{$conn}{'SYN_SENT'}^$tcp_map{$conn}{'SYN_RECV'}^$tcp_map{$conn}{'SYN_WAIT'}^$tcp_map{$conn}{'FIN_WAIT1'}^$tcp_map{$conn}{'FIN_WAIT2'}^$tcp_map{$conn}{'CLOSE'}^$tcp_map{$conn}{'LAST_ACK'}^$tcp_map{$conn}{'CLOSING'}^$tcp_map{$conn}{'UNKNOWN'}^$name_and_user^^^";
             if ($debug)
