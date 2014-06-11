@@ -534,7 +534,6 @@ sub do_check
         #print Dumper(%tcp_map);
     }
     open ERR, ">>$errorlog" || print "open $errorlog file error!\n";
-    print ERR "时间:$date $time\n";
     #生成统计报文
     if ($report_switch){
         my $msghead = "SYSTEMLOG|TCPNETSTAT|$hostID|";
