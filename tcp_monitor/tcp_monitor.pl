@@ -36,11 +36,13 @@ use Time::Local;
 my $_refresh_rate = 300; #Refresh rate of the netstat data
 
 use FindBin qw($Bin);
-my $cfg_file = "$Bin/tcp_monitor.conf";
+my $cfg_file = "$Bin/../etc/tcp_monitor.conf";
 
 # debug开关，debug日志文件名
 my $debug = 1;
 my $debuglog = "$Bin/tcp_monitor.log";
+
+my $errorlog = "$Bin/tcp_monitor_error.log";
 
 # 报警开关
 my $alarm_switch = 1;
@@ -304,11 +306,11 @@ sub get_name
 {
     my $conn = shift;
     my $pid = shift;
-    if (exists $comlist{$conn} and $comlist{$conn} ne 'unknown^unknown')
+    if (exists $comlist{$conn} and $comlist{$conn} ne 'unknow^unknow')
     {
         return $comlist{$conn};
     }else{
-        $comlist{$conn} = 'unknown^unknown';
+        $comlist{$conn} = 'unknow^unknow';
         if ($os ne $os_win)
         {
             my ($side,$port,$lip,$fip) = split /\^/,$conn;
@@ -530,7 +532,8 @@ sub do_check
         #print LOG Dumper(%conns);
         #print Dumper(%tcp_map);
     }
-    
+    open ERR, ">>$errorlog" || print "open $errorlog file error!\n";
+    print ERR "时间:$date $time\n";
     #生成统计报文
     if ($report_switch){
         my $msghead = "SYSTEMLOG|TCPNETSTAT|$hostID|";
@@ -557,6 +560,12 @@ sub do_check
                 $address = "$side^$lip^$tcp_map{$conn}{'l_port'}^$fip^$port";
             }
             my $msgbody = "$date$time^tcp^$address^$tcp_map{$conn}{'recvq'}^$tcp_map{$conn}{'sendq'}^$tcp_map{$conn}{'ESTABLISHED'}^$tcp_map{$conn}{'TIME_WAIT'}^$tcp_map{$conn}{'CLOSE_WAIT'}^$tcp_map{$conn}{'SYN_SENT'}^$tcp_map{$conn}{'SYN_RECV'}^$tcp_map{$conn}{'SYN_WAIT'}^$tcp_map{$conn}{'FIN_WAIT1'}^$tcp_map{$conn}{'FIN_WAIT2'}^$tcp_map{$conn}{'CLOSE'}^$tcp_map{$conn}{'LAST_ACK'}^$tcp_map{$conn}{'CLOSING'}^$tcp_map{$conn}{'UNKNOWN'}^$name_and_user^^^";
+            if ($name_and_user eq 'unknow^unknow'){
+                print ERR "获取进程名失败: $msgbody\n";
+            }
+            if ($side eq 'client' and $port > 40000){
+                print ERR "服务端端口大于40000: $msgbody";
+            }
             if ($debug)
             {
                 print LOG "连接统计 $msgbody\n";
@@ -689,6 +698,8 @@ sub do_check
             }
         }
     }
+
+    close ERR;
 
     if ($debug)
     {
