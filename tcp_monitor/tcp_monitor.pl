@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #author:        zwj@skybility.com
-#version:       1.4.5
+#version:       1.4.6
 #last modfiy:   2014-06-11
 #This script is tcp status from netstat and alarm when it is over threshold.
 #changelog:
@@ -25,6 +25,7 @@
 #    1.4.3 改为用Time::Local模块计算时间（兼容更多发行版）
 #    1.4.4 修复aix上把server端连接当成client端的问题
 #    1.4.5 把判断为client的端口也记录并输出到连接信息里
+#    1.4.6 增加一个异常日志文件
 
 use strict;
 use warnings;
