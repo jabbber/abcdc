@@ -26,6 +26,7 @@
 #    1.4.4 修复aix上把server端连接当成client端的问题
 #    1.4.5 把判断为client的端口也记录并输出到连接信息里
 #    1.4.6 增加一个异常日志文件,日志文件改为每天生成一个
+#    1.4.7 把判断为server的连接的远端端口去掉
 
 use strict;
 use warnings;
@@ -555,7 +556,7 @@ sub do_check
             my $address;
             if ($side eq 'server')
             {
-                $address = "$side^$lip^$port^$fip^$tcp_map{$conn}{'f_port'}";
+                $address = "$side^$lip^$port^$fip^";
             }else{
                 $address = "$side^$lip^$tcp_map{$conn}{'l_port'}^$fip^$port";
             }
