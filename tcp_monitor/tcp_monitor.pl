@@ -28,6 +28,7 @@
 #    1.4.6 增加一个异常日志文件,日志文件改为每天生成一个
 #    1.4.7 把判断为server的连接的远端端口去掉
 #    1.4.8 把判断为client的连接的本地端口在报文中去掉，在debug日志中打印出来
+#    1.5.0 配置文件中增加一项处理脚本的配置，可以在发生报警的时候触发执行处理脚本
 
 use strict;
 use warnings;
@@ -42,10 +43,10 @@ use FindBin qw($Bin);
 my $cfg_file = "$Bin/../etc/tcp_monitor.conf";
 
 # debug开关，debug日志文件名
-my $debug = 1;
-my $debuglog = "$Bin/tcp_monitor_debug.log";
+my $debug = 0;
+my $debuglog = "$Bin/../log/tcp_monitor_debug.log";
 
-my $errorlog = "$Bin/tcp_monitor_error.log";
+my $errorlog = "$Bin/../log/tcp_monitor_error.log";
 
 # 报警开关
 my $alarm_switch = 1;
@@ -64,6 +65,8 @@ my %threshold = (
     'TIME_WAIT' => {'warning'=>1000,'alarm'=>2000}
 );
 
+my $action_script = "";
+
 if (-r $cfg_file)
 {
     open FD, $cfg_file;
@@ -72,6 +75,11 @@ if (-r $cfg_file)
         chomp;
         if (/^\s*#/ or /^\s*$/){next;}
         my @arry = split(/\s+/,$_);
+        if (-x $arry[0] and ! exists $arry[1])
+        {
+            $action_script = $_;
+            next;
+        }
         $threshold{$arry[0]} = {
             'warning' => $arry[1],
             'alarm' => $arry[2]
@@ -529,13 +537,13 @@ sub do_check
     my %tcp_map = &report_data(@stats);
     if ($debug){
         use Data::Dumper;
-        open LOG, ">>$debuglog.$date" || print "open $debuglog.$date file error!\n";
+        open LOG, ">>$debuglog.$date" or die "open $debuglog.$date file error! exit.\n";
         print LOG "时间:$date $time\n";
         #print LOG "数据采集:\n";
         #print LOG Dumper(%conns);
         #print Dumper(%tcp_map);
     }
-    open ERR, ">>$errorlog.$date" || print "open $errorlog.$date file error!\n";
+    open ERR, ">>$errorlog.$date" or die "open $errorlog.$date file error! exit.\n";
     #生成统计报文
     if ($report_switch){
         my $msghead = "SYSTEMLOG|TCPNETSTAT|$hostID|";
@@ -566,12 +574,12 @@ sub do_check
                 print ERR "获取进程名失败: $msgbody\n";
             }
             if ($side eq 'client' and $port > 40000){
-                print ERR "服务端端口大于40000: $msgbody";
+                print ERR "服务端端口大于40000: $msgbody\n";
+                print ERR "$side^$lip^$tcp_map{$conn}{'l_port'}^$fip^$port\n";
             }
             if ($debug)
             {
                 print LOG "连接统计 $msgbody\n";
-                print LOG "$side^$lip^$tcp_map{$conn}{'l_port'}^$fip^$port";
             }
             $report .= $msgbody;
         }
@@ -583,11 +591,13 @@ sub do_check
 
     #生成报警报文
     if ($alarm_switch){
+        my $toggle = 0;
         foreach my $stat (keys %conns)
         {
             my $level = &level($stat,$conns{$stat}{'total'});
             if ($level ne "normal")
             {
+                $toggle = 1;
                 $stats{$stat}{'count'} += 1;
                 if ($stats{$stat}{'count'} > 10){
                     if ($debug)
@@ -684,20 +694,35 @@ sub do_check
                 {
                     print LOG "报警信息($stat 计数:$stats{$stat}{'count'}):$msg\n";
                 }
-                print "$msg\n";
                 &sendUDP("$msg");
+
             }
             else
             {
                 if (!exists $stats{$stat})
                 {
-                    print "Warning: unknow tcp status '$stat'.\n";
+                    print ERR "Warning: unknow tcp status '$stat'.\n";
                 }
                 if ($debug)
                 {
                     print LOG "报警信息($stat 计数:$stats{$stat}{'count'}):总数$conns{$stat}{'total'},低于阀值，重置报警计数为0\n";
                 }
                 $stats{$stat}{'count'} = 0;
+            }
+        }
+        if ($toggle == 1)
+        {
+            if (-x $action_script)
+            {
+                if ($debug)
+                {
+                    print LOG "触发了报警，执行处理脚本: $action_script\n";
+                }
+                system($action_script);
+            }
+            else
+            {
+                print ERR "Error: $action_script can not execution!\n";
             }
         }
     }
