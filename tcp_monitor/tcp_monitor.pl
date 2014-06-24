@@ -27,6 +27,7 @@
 #    1.4.5 把判断为client的端口也记录并输出到连接信息里
 #    1.4.6 增加一个异常日志文件,日志文件改为每天生成一个
 #    1.4.7 把判断为server的连接的远端端口去掉
+#    1.4.8 把判断为client的连接的本地端口在报文中去掉，在debug日志中打印出来
 
 use strict;
 use warnings;
@@ -558,7 +559,7 @@ sub do_check
             {
                 $address = "$side^$lip^$port^$fip^";
             }else{
-                $address = "$side^$lip^$tcp_map{$conn}{'l_port'}^$fip^$port";
+                $address = "$side^$lip^^$fip^$port";
             }
             my $msgbody = "$date$time^tcp^$address^$tcp_map{$conn}{'recvq'}^$tcp_map{$conn}{'sendq'}^$tcp_map{$conn}{'ESTABLISHED'}^$tcp_map{$conn}{'TIME_WAIT'}^$tcp_map{$conn}{'CLOSE_WAIT'}^$tcp_map{$conn}{'SYN_SENT'}^$tcp_map{$conn}{'SYN_RECV'}^$tcp_map{$conn}{'SYN_WAIT'}^$tcp_map{$conn}{'FIN_WAIT1'}^$tcp_map{$conn}{'FIN_WAIT2'}^$tcp_map{$conn}{'CLOSE'}^$tcp_map{$conn}{'LAST_ACK'}^$tcp_map{$conn}{'CLOSING'}^$tcp_map{$conn}{'UNKNOWN'}^$name_and_user^^^";
             if ($name_and_user eq 'unknow^unknow'){
@@ -570,6 +571,7 @@ sub do_check
             if ($debug)
             {
                 print LOG "连接统计 $msgbody\n";
+                print LOG "$side^$lip^$tcp_map{$conn}{'l_port'}^$fip^$port";
             }
             $report .= $msgbody;
         }
