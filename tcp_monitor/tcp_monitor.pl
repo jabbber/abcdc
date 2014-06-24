@@ -718,7 +718,7 @@ sub do_check
                 {
                     print LOG "触发了报警，执行处理脚本: $action_script\n";
                 }
-                system($action_script);
+                system("$action_script >/dev/null 2>&1 &");
             }
             else
             {
