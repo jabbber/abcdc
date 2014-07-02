@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 #author:        zwj@skybility.com
-#version:       1.4.6
-#last modfiy:   2014-06-11
+#version:       1.6.0
+#last modfiy:   2014-07-2
 #This script is tcp status from netstat and alarm when it is over threshold.
 #changelog:
 #    0.1 tcp连接状态计数监控脚本
@@ -29,6 +29,7 @@
 #    1.4.7 把判断为server的连接的远端端口去掉
 #    1.4.8 把判断为client的连接的本地端口在报文中去掉，在debug日志中打印出来
 #    1.5.0 配置文件中增加一项处理脚本的配置，可以在发生报警的时候触发执行处理脚本
+#    1.6.0 配置文件规范化为ini格式
 
 use strict;
 use warnings;
@@ -36,63 +37,124 @@ use IO::Socket;
 use POSIX 'setsid';
 use Time::Local;
 
+use FindBin qw($Bin);
+my $cfg_file = "$Bin/../etc/tcp_monitor.conf.ini";
+
 # 刷新间隔
 my $_refresh_rate = 300; #Refresh rate of the netstat data
 
-use FindBin qw($Bin);
-my $cfg_file = "$Bin/../etc/tcp_monitor.conf";
-
 # debug开关，debug日志文件名
-my $debug = 0;
-my $debuglog = "$Bin/../log/tcp_monitor_debug.log";
+my $debug = 'off';
+my $debuglog = "../log/tcp_monitor_debug.log";
 
-my $errorlog = "$Bin/../log/tcp_monitor_error.log";
+my $errorlog = "../log/tcp_monitor_error.log";
 
 # 报警开关
-my $alarm_switch = 1;
+my $alarm_switch = 'on';
 my $alarm_ip = "10.235.128.195";
 my $alarm_port = 31820;
 
 # 发送tcp连接信息开关
-my $report_switch = 1;
+my $report_switch = 'on';
 my $report_ip = "10.235.128.195";
 my $report_port = 31830;
 
-# read and set default config
-my %threshold = (
-    'Recv-Q' => {'warning'=>8192,'alarm'=>10240},
-    'Send-Q' => {'warning'=>8192,'alarm'=>10240},
-    'TIME_WAIT' => {'warning'=>1000,'alarm'=>2000}
-);
-
 my $action_script = "";
 
-if (-r $cfg_file)
-{
-    open FD, $cfg_file;
-    while(<FD>)
-    {
-        chomp;
-        if (/^\s*#/ or /^\s*$/){next;}
-        my @arry = split(/\s+/,$_);
-        if (-x $arry[0] and ! exists $arry[1])
-        {
-            $action_script = $_;
-            next;
+# read and set default config
+my %threshold = (
+    'ESTABLISHED' => {'warning',30000,'alarm',50000,'switch','off','trigger','off'},
+    'SYN_SENT' => {'warning',30000,'alarm',50000,'switch','off','trigger','off'},
+    'SYN_RECV' => {'warning',30000,'alarm',50000,'switch','off','trigger','off'},
+    'FIN_WAIT1' => {'warning',30000,'alarm',50000,'switch','off','trigger','off'},
+    'FIN_WAIT2' => {'warning',30000,'alarm',50000,'switch','off','trigger','off'},
+    'TIME_WAIT' => {'warning',1000,'alarm',2000,'switch','on','trigger','on'},
+    'CLOSE' => {'warning',30000,'alarm',50000,'switch','off','trigger','off'},
+    'CLOSE_WAIT' => {'warning',30000,'alarm',50000,'switch','off','trigger','off'},
+    'LAST_ACK' => {'warning',30000,'alarm',50000,'switch','off','trigger','off'},
+    'LISTEN' => {'warning',30000,'alarm',50000,'switch','off','trigger','off'},
+    'CLOSING' => {'warning',30000,'alarm',50000,'switch','off','trigger','off'},
+    'UNKNOWN' => {'warning',30000,'alarm',50000,'switch','off','trigger','off'},
+    'Recv-Q' => {'warning',8192,'alarm',10240,'switch','on','trigger','on'},
+    'Send-Q' => {'warning'=>8192,'alarm'=>10240,'switch','on','trigger','on'}
+);
+
+package IniParser;
+    sub new() {
+        my $type = shift;
+        my $this = {};
+        $this->{'iniFile'} = shift;
+        $this->{'iniString'} = "";
+        $this->{'err'} = "";
+        open CONFIG,"$this->{'iniFile'}" or $this->{'err'} = "open $this->{'iniFile'}: $!";
+        if (! $this->{'err'}){
+            while( my $string = <CONFIG>){
+                $this->{'iniString'} .= $string;
+            }
+            close CONFIG;
         }
-        $threshold{$arry[0]} = {
-            'warning' => $arry[1],
-            'alarm' => $arry[2]
-        };
-        if (exists $arry[3])
-        {
-            if ($arry[3] eq 'off')
-            {
-                delete $threshold{$arry[0]};
+        bless $this, $type;
+        return $this;
+    }
+
+    sub val()
+    {
+        my $this = shift @_;
+        my $session = shift;
+        my $key = shift;
+        my $flag = 0;
+        my @lines = split(/\n/, $this->{'iniString'});
+        foreach my $string (@lines){
+            chomp $string;
+            if($flag == 0){
+                if ( $string =~ /^\[$session\]/ ){
+                $flag = 1;
+                }
+            }else{
+                if( $string =~ /^\[/){
+                last;}
+                if ( $string =~ /^#/){
+                    next;
+                }
+                if ($string =~ /^(\w+)=(.*)/){
+                    my $k = $1;
+                    my $v = $2;
+                    if($k eq $key){
+                        return $v;
+                    }
+                }
             }
         }
+        return "";
     }
-    close FD;
+1;
+
+sub overWrite()
+{
+    if ($_[1] ne ""){ $_[0]=$_[1];}
+}
+
+my $conf = IniParser->new($cfg_file);
+if ($conf->{'err'}){
+    print $conf->{'err'};
+    print "using default config.\n";
+}else{
+    &overWrite($_refresh_rate, $conf->val('main', 'refresh_rate'));
+    &overWrite($errorlog, $conf->val('main', 'errorlog'));
+    &overWrite($debug, $conf->val('main', 'debug'));
+    &overWrite($debuglog, $conf->val('main', 'debuglog'));
+    &overWrite($alarm_switch, $conf->val('main', 'alarm_switch'));
+    &overWrite($alarm_ip, $conf->val('main', 'alarm_ip'));
+    &overWrite($alarm_port, $conf->val('main', 'alarm_port'));
+    &overWrite($report_switch, $conf->val('main', 'report_switch'));
+    &overWrite($report_ip, $conf->val('main', 'report_ip'));
+    &overWrite($report_port, $conf->val('main', 'report_port'));
+    &overWrite($action_script, $conf->val('main', 'report_script'));
+    foreach my $state (keys %threshold){
+        foreach my $key (keys %{$threshold{$state}}){
+            &overWrite($threshold{$state}{$key}, $conf->val('alarm', $state .'_'.$key));
+        }
+    }
 }
 
 # decide OS
@@ -278,7 +340,6 @@ sub report_data
                 'ESTABLISHED' => 0,
                 'SYN_SENT' => 0,
                 'SYN_RECV' => 0,
-                'SYN_WAIT' => 0,
                 'FIN_WAIT1' => 0,
                 'FIN_WAIT2' => 0,
                 'TIME_WAIT' => 0,
@@ -535,17 +596,18 @@ sub do_check
     my @stats = &get_netstat;
     my %conns = &warning_data(@stats);
     my %tcp_map = &report_data(@stats);
-    if ($debug){
+    use FindBin qw($Bin);
+    if ($debug eq 'on'){
         use Data::Dumper;
-        open LOG, ">>$debuglog.$date" or die "open $debuglog.$date file error! exit.\n";
+        open LOG, ">>$Bin/$debuglog.$date" or die "open $Bin/$debuglog.$date file error! exit.\n";
         print LOG "时间:$date $time\n";
         #print LOG "数据采集:\n";
         #print LOG Dumper(%conns);
         #print Dumper(%tcp_map);
     }
-    open ERR, ">>$errorlog.$date" or die "open $errorlog.$date file error! exit.\n";
+    open ERR, ">>$Bin/$errorlog.$date" or die "open $Bin/$errorlog.$date file error! exit.\n";
     #生成统计报文
-    if ($report_switch){
+    if ($report_switch eq 'on'){
         my $msghead = "SYSTEMLOG|TCPNETSTAT|$hostID|";
         my $report = '';
         foreach my $conn (keys %tcp_map)
@@ -569,15 +631,15 @@ sub do_check
             }else{
                 $address = "$side^$lip^^$fip^$port";
             }
-            my $msgbody = "$date$time^tcp^$address^$tcp_map{$conn}{'recvq'}^$tcp_map{$conn}{'sendq'}^$tcp_map{$conn}{'ESTABLISHED'}^$tcp_map{$conn}{'TIME_WAIT'}^$tcp_map{$conn}{'CLOSE_WAIT'}^$tcp_map{$conn}{'SYN_SENT'}^$tcp_map{$conn}{'SYN_RECV'}^$tcp_map{$conn}{'SYN_WAIT'}^$tcp_map{$conn}{'FIN_WAIT1'}^$tcp_map{$conn}{'FIN_WAIT2'}^$tcp_map{$conn}{'CLOSE'}^$tcp_map{$conn}{'LAST_ACK'}^$tcp_map{$conn}{'CLOSING'}^$tcp_map{$conn}{'UNKNOWN'}^$name_and_user^^^";
+            my $msgbody = "$date$time^tcp^$address^$tcp_map{$conn}{'recvq'}^$tcp_map{$conn}{'sendq'}^$tcp_map{$conn}{'ESTABLISHED'}^$tcp_map{$conn}{'TIME_WAIT'}^$tcp_map{$conn}{'CLOSE_WAIT'}^$tcp_map{$conn}{'SYN_SENT'}^$tcp_map{$conn}{'SYN_RECV'}^^$tcp_map{$conn}{'FIN_WAIT1'}^$tcp_map{$conn}{'FIN_WAIT2'}^$tcp_map{$conn}{'CLOSE'}^$tcp_map{$conn}{'LAST_ACK'}^$tcp_map{$conn}{'CLOSING'}^$tcp_map{$conn}{'UNKNOWN'}^$name_and_user^^^";
             if ($name_and_user eq 'unknow^unknow'){
-                print ERR "获取进程名失败: $msgbody\n";
+                print ERR localtime(time)." 获取进程名失败: $msgbody\n";
             }
             if ($side eq 'client' and $port > 40000){
-                print ERR "服务端端口大于40000: $msgbody\n";
-                print ERR "$side^$lip^$tcp_map{$conn}{'l_port'}^$fip^$port\n";
+                print ERR localtime(time)." 服务端端口大于40000: $msgbody\n";
+                print ERR localtime(time)." $side^$lip^$tcp_map{$conn}{'l_port'}^$fip^$port\n";
             }
-            if ($debug)
+            if ($debug eq 'on')
             {
                 print LOG "连接统计 $msgbody\n";
             }
@@ -590,7 +652,7 @@ sub do_check
     }
 
     #生成报警报文
-    if ($alarm_switch){
+    if ($alarm_switch eq 'on'){
         my $toggle = 0;
         foreach my $stat (keys %conns)
         {
@@ -600,7 +662,7 @@ sub do_check
                 $toggle = 1;
                 $stats{$stat}{'count'} += 1;
                 if ($stats{$stat}{'count'} > 10){
-                    if ($debug)
+                    if ($debug eq 'on')
                     {
                         print LOG "报警信息($stat 计数:$stats{$stat}{'count'}):总数$conns{$stat}{'total'},报警次数超过上限10,跳过\n";
                     }
@@ -690,7 +752,7 @@ sub do_check
                 }
 
                 my $msg = "CUSTOM^$proCode^$date^$time^$seqID^$hostID^$serverID^$project^$source^$warnValue^$warnID^$warnLevel^$warnText^$warnShortMsg^$warnDetailMsg^$relType^$relID^$relText";
-                if ($debug)
+                if ($debug eq 'on')
                 {
                     print LOG "报警信息($stat 计数:$stats{$stat}{'count'}):$msg\n";
                 }
@@ -701,9 +763,9 @@ sub do_check
             {
                 if (!exists $stats{$stat})
                 {
-                    print ERR "Warning: unknow tcp status '$stat'.\n";
+                    print ERR localtime(time)." Warning: unknow tcp status '$stat'.\n";
                 }
-                if ($debug)
+                if ($debug eq 'on')
                 {
                     print LOG "报警信息($stat 计数:$stats{$stat}{'count'}):总数$conns{$stat}{'total'},低于阀值，重置报警计数为0\n";
                 }
@@ -712,24 +774,20 @@ sub do_check
         }
         if ($toggle == 1)
         {
-            if (-x $action_script)
+            if ($action_script)
             {
-                if ($debug)
+                if ($debug eq 'on')
                 {
                     print LOG "触发了报警，执行处理脚本: $action_script\n";
                 }
-                system("$action_script >/dev/null 2>&1 &");
-            }
-            else
-            {
-                print ERR "Error: $action_script can not execution!\n";
+                system("$action_script") == 0 or print ERR localtime(time)." 报警触发时自动执行命令'$action_script'时执行出错\n";
             }
         }
     }
 
     close ERR;
 
-    if ($debug)
+    if ($debug eq 'on')
     {
         close LOG;
     }
