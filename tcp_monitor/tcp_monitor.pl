@@ -30,12 +30,15 @@
 #    1.4.8 把判断为client的连接的本地端口在报文中去掉，在debug日志中打印出来
 #    1.5.0 配置文件中增加一项处理脚本的配置，可以在发生报警的时候触发执行处理脚本
 #    1.6.0 配置文件规范化为ini格式
+#    1.6.1 每个报警项设置触发脚本开关，报警触发处理脚本的时机提前到判断为报警状态时立即执行，执行命令在子线程中进行，如果子进程未结束，新的报警不会再次触发处理脚本。
 
 use strict;
 use warnings;
 use IO::Socket;
 use POSIX 'setsid';
 use Time::Local;
+use threads;
+use threads::shared;
 
 use FindBin qw($Bin);
 my $cfg_file = "$Bin/../etc/tcp_monitor.conf.ini";
@@ -149,7 +152,7 @@ if ($conf->{'err'}){
     &overWrite($report_switch, $conf->val('main', 'report_switch'));
     &overWrite($report_ip, $conf->val('main', 'report_ip'));
     &overWrite($report_port, $conf->val('main', 'report_port'));
-    &overWrite($action_script, $conf->val('main', 'report_script'));
+    &overWrite($action_script, $conf->val('main', 'action_script'));
     foreach my $state (keys %threshold){
         foreach my $key (keys %{$threshold{$state}}){
             &overWrite($threshold{$state}{$key}, $conf->val('alarm', $state .'_'.$key));
@@ -452,7 +455,7 @@ sub level
 {
     my ($name, $value) = @_;
     my $level = 'normal';
-    if (exists $threshold{$name})
+    if (exists $threshold{$name} and $threshold{$name}{'switch'} eq 'on')
     {
         if ($value >= $threshold{$name}{'alarm'})
         {
@@ -540,10 +543,6 @@ my %stats = (
         'ServerID'=>'tcp_syn_recv',
         'WarnID'=>'0006',
         'count'=>0},
-    'SYN_WAIT' => {
-        'ServerID'=>'tcp_syn_wait',
-        'WarnID'=>'0007',
-        'count'=>0},
     'FIN_WAIT1' => {
         'ServerID'=>'tcp_fin_wait1',
         'WarnID'=>'0008',
@@ -588,6 +587,15 @@ my $relType = "";
 my $relID = "";
 my $relText = "";
 
+my $action :shared = 0;
+my $action_err :shared = "";
+sub action_thread()
+{
+    my $command = shift;
+    system("$command") == 0 or $action_err = localtime(time)." 报警触发时自动执行命令'$command'时执行出错,return $?,'$!'.";
+    $action = 0;
+}
+
 sub do_check
 {
     my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
@@ -606,60 +614,36 @@ sub do_check
         #print Dumper(%tcp_map);
     }
     open ERR, ">>$Bin/$errorlog.$date" or die "open $Bin/$errorlog.$date file error! exit.\n";
-    #生成统计报文
-    if ($report_switch eq 'on'){
-        my $msghead = "SYSTEMLOG|TCPNETSTAT|$hostID|";
-        my $report = '';
-        foreach my $conn (keys %tcp_map)
-        {
-            if (length $report > 0)
-            {
-                if (length $report > 3500)
-                {
-                    &sendReport($msghead.$report);
-                    $report = '';
-                }else{
-                    $report .= '#^#';
-                }
-            }
-            my $name_and_user = &get_name($conn,$tcp_map{$conn}{'pid'});
-            my ($side,$port,$lip,$fip) = split /\^/,$conn;
-            my $address;
-            if ($side eq 'server')
-            {
-                $address = "$side^$lip^$port^$fip^";
-            }else{
-                $address = "$side^$lip^^$fip^$port";
-            }
-            my $msgbody = "$date$time^tcp^$address^$tcp_map{$conn}{'recvq'}^$tcp_map{$conn}{'sendq'}^$tcp_map{$conn}{'ESTABLISHED'}^$tcp_map{$conn}{'TIME_WAIT'}^$tcp_map{$conn}{'CLOSE_WAIT'}^$tcp_map{$conn}{'SYN_SENT'}^$tcp_map{$conn}{'SYN_RECV'}^^$tcp_map{$conn}{'FIN_WAIT1'}^$tcp_map{$conn}{'FIN_WAIT2'}^$tcp_map{$conn}{'CLOSE'}^$tcp_map{$conn}{'LAST_ACK'}^$tcp_map{$conn}{'CLOSING'}^$tcp_map{$conn}{'UNKNOWN'}^$name_and_user^^^";
-            if ($name_and_user eq 'unknow^unknow'){
-                print ERR localtime(time)." 获取进程名失败: $msgbody\n";
-            }
-            if ($side eq 'client' and $port > 40000){
-                print ERR localtime(time)." 服务端端口大于40000: $msgbody\n";
-                print ERR localtime(time)." $side^$lip^$tcp_map{$conn}{'l_port'}^$fip^$port\n";
-            }
-            if ($debug eq 'on')
-            {
-                print LOG "连接统计 $msgbody\n";
-            }
-            $report .= $msgbody;
-        }
-        if (length $report > 0)
-        {
-            &sendReport($msghead.$report);
-        }
-    }
 
     #生成报警报文
     if ($alarm_switch eq 'on'){
-        my $toggle = 0;
+        my $alarm = 0;
         foreach my $stat (keys %conns)
         {
+            if ($action == 0 and $action_err){
+                print ERR "$action_err\n";
+                $action_err = "";
+            }
             my $level = &level($stat,$conns{$stat}{'total'});
             if ($level ne "normal")
             {
-                $toggle = 1;
+                if ($alarm == 0 and $action_script and $threshold{$stat}{'trigger'} eq 'on'){
+                    $alarm = 1;
+                    if ($action == 0)
+                    {
+                        $action = 1;
+                        if ($debug eq 'on')
+                        {
+                            print LOG "$stat报警，触发执行处理脚本: $action_script\n";
+                        }
+                        my $action_t = threads->create( \&action_thread, $action_script);
+                        $action_t->detach();
+                    }else{
+                        if ($debug eq 'on'){
+                            print LOG "$stat报警，上一次触发后脚本'$action_script'尚未执行完毕，本次跳过.\n";
+                        }
+                    }
+                }
                 $stats{$stat}{'count'} += 1;
                 if ($stats{$stat}{'count'} > 10){
                     if ($debug eq 'on')
@@ -772,16 +756,50 @@ sub do_check
                 $stats{$stat}{'count'} = 0;
             }
         }
-        if ($toggle == 1)
+    }
+
+    #生成统计报文
+    if ($report_switch eq 'on'){
+        my $msghead = "SYSTEMLOG|TCPNETSTAT|$hostID|";
+        my $report = '';
+        foreach my $conn (keys %tcp_map)
         {
-            if ($action_script)
+            if (length $report > 0)
             {
-                if ($debug eq 'on')
+                if (length $report > 3500)
                 {
-                    print LOG "触发了报警，执行处理脚本: $action_script\n";
+                    &sendReport($msghead.$report);
+                    $report = '';
+                }else{
+                    $report .= '#^#';
                 }
-                system("$action_script") == 0 or print ERR localtime(time)." 报警触发时自动执行命令'$action_script'时执行出错\n";
             }
+            my $name_and_user = &get_name($conn,$tcp_map{$conn}{'pid'});
+            my ($side,$port,$lip,$fip) = split /\^/,$conn;
+            my $address;
+            if ($side eq 'server')
+            {
+                $address = "$side^$lip^$port^$fip^";
+            }else{
+                $address = "$side^$lip^^$fip^$port";
+            }
+            my $msgbody = "$date$time^tcp^$address^$tcp_map{$conn}{'recvq'}^$tcp_map{$conn}{'sendq'}^$tcp_map{$conn}{'ESTABLISHED'}^$tcp_map{$conn}{'TIME_WAIT'}^$tcp_map{$conn}{'CLOSE_WAIT'}^$tcp_map{$conn}{'SYN_SENT'}^$tcp_map{$conn}{'SYN_RECV'}^0^$tcp_map{$conn}{'FIN_WAIT1'}^$tcp_map{$conn}{'FIN_WAIT2'}^$tcp_map{$conn}{'CLOSE'}^$tcp_map{$conn}{'LAST_ACK'}^$tcp_map{$conn}{'CLOSING'}^$tcp_map{$conn}{'UNKNOWN'}^$name_and_user^^^";
+            if ($name_and_user eq 'unknow^unknow'){
+                print ERR localtime(time)." 获取进程名失败: $msgbody\n";
+            }
+            if ($side eq 'client' and $port > 40000){
+                print ERR localtime(time)." 服务端端口大于40000: $msgbody\n";
+                print ERR localtime(time)." $side^$lip^$tcp_map{$conn}{'l_port'}^$fip^$port\n";
+            }
+            if ($debug eq 'on')
+            {
+                print LOG "连接统计 $msgbody\n";
+            }
+            $report .= $msgbody;
+        }
+        if (length $report > 0)
+        {
+            &sendReport($msghead.$report);
         }
     }
 
