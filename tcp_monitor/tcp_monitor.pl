@@ -87,12 +87,20 @@ package IniParser;
         my $type = shift;
         my $this = {};
         $this->{'iniFile'} = shift;
-        $this->{'iniString'} = "";
         $this->{'err'} = "";
+        $this->{'val'} = {};
         open CONFIG,"$this->{'iniFile'}" or $this->{'err'} = "open $this->{'iniFile'}: $!";
         if (! $this->{'err'}){
-            while( my $string = <CONFIG>){
-                $this->{'iniString'} .= $string;
+            my $session;
+            while (my $string = <CONFIG>){
+                chomp $string;
+                if ( $string =~ /^#/){next;}
+                if ( $string =~ /^\[(\w+)\]/ ){
+                    $session = $1;
+                    $this->{'val'}{$session} = {};
+                }elsif($session and $string =~ /^(\w+)=(.*)/){
+                    $this->{'val'}{$session}{$1} = $2;
+                }
             }
             close CONFIG;
         }
@@ -105,30 +113,11 @@ package IniParser;
         my $this = shift @_;
         my $session = shift;
         my $key = shift;
-        my $flag = 0;
-        my @lines = split(/\n/, $this->{'iniString'});
-        foreach my $string (@lines){
-            chomp $string;
-            if($flag == 0){
-                if ( $string =~ /^\[$session\]/ ){
-                $flag = 1;
-                }
-            }else{
-                if( $string =~ /^\[/){
-                last;}
-                if ( $string =~ /^#/){
-                    next;
-                }
-                if ($string =~ /^(\w+)=(.*)/){
-                    my $k = $1;
-                    my $v = $2;
-                    if($k eq $key){
-                        return $v;
-                    }
-                }
-            }
+        if (exists $this->{'val'}{$session}{$key}){
+            return $this->{'val'}{$session}{$key};
+        }else{
+            return "";
         }
-        return "";
     }
 1;
 
@@ -140,6 +129,7 @@ sub overWrite()
 my $conf = IniParser->new($cfg_file);
 if ($conf->{'err'}){
     print $conf->{'err'};
+    print "\n";
     print "using default config.\n";
 }else{
     &overWrite($_refresh_rate, $conf->val('main', 'refresh_rate'));
