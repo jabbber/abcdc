@@ -365,6 +365,28 @@ sub report_data
     return %tcp_map;
 }
 
+my $pre_time = 0;
+my %tcp_time;
+sub time_data
+{
+    my $time = shift;
+    my @lines = @_;
+    my %new_tcp_time;
+    foreach my $tcp (@lines)
+    {
+        my @line = split /\s+/, $tcp;
+        if ($line[$tcp_state_at] eq 'LISTEN')
+        {next;}
+        if (exists $tcp_time{"$line[$tcp_state_at]^$line[$local_address_at]^$line[$foreign_address_at]"})
+        {
+            $new_tcp_time{"$line[$tcp_state_at]^$line[$local_address_at]^$line[$foreign_address_at]"} = $tcp_time{"$line[$tcp_state_at]^$line[$local_address_at]^$line[$foreign_address_at]"} + $time;
+        }else{
+            $new_tcp_time{"$line[$tcp_state_at]^$line[$local_address_at]^$line[$foreign_address_at]"} = 0;
+        }
+    }
+    return %new_tcp_time;
+}
+
 #get connect command name and user
 my %comlist;
 sub get_name
@@ -589,12 +611,14 @@ sub action_thread()
 sub do_check
 {
     my @stats = &get_netstat;
-    my $time = time;
-    my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime($time);
+    my $stime = time;
+    my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime($stime);
     my $date = sprintf("%04d%02d%02d",$year+1900,$mon+1,$mday);
     my $time = sprintf("%02d%02d%02d",$hour,$min,$sec);
     my %conns = &warning_data(@stats);
     my %tcp_map = &report_data(@stats);
+    %tcp_time = &time_data(($stime - $pre_time),@stats);
+    $pre_time = $stime;
     use FindBin qw($Bin);
     if ($debug eq 'on'){
         use Data::Dumper;
@@ -602,7 +626,7 @@ sub do_check
         print LOG "时间:$date $time\n";
         #print LOG "数据采集:\n";
         #print LOG Dumper(%conns);
-        #print Dumper(%tcp_map);
+        #print Dumper(%tcp_time);
     }
     open ERR, ">>$Bin/$errorlog.$date" or die "open $Bin/$errorlog.$date file error! exit.\n";
 
@@ -745,6 +769,12 @@ sub do_check
                     print LOG "报警信息($stat 计数:$stats{$stat}{'count'}):总数$conns{$stat}{'total'},低于阀值，重置报警计数为0\n";
                 }
                 $stats{$stat}{'count'} = 0;
+            }
+        }
+        for my $lk (keys %tcp_time){
+            if ($debug eq 'on')
+            {
+                print LOG "计时信息($lk 计时:$tcp_time{$lk}秒\n";
             }
         }
     }
