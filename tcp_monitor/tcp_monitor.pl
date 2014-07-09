@@ -588,10 +588,11 @@ sub action_thread()
 
 sub do_check
 {
-    my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
+    my @stats = &get_netstat;
+    my $time = time;
+    my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime($time);
     my $date = sprintf("%04d%02d%02d",$year+1900,$mon+1,$mday);
     my $time = sprintf("%02d%02d%02d",$hour,$min,$sec);
-    my @stats = &get_netstat;
     my %conns = &warning_data(@stats);
     my %tcp_map = &report_data(@stats);
     use FindBin qw($Bin);
