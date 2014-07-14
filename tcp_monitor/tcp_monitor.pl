@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 #author:        zwj@skybility.com
-#version:       1.6.1
-#last modfiy:   2014-07-10
+#version:       1.7.0
+#last modfiy:   2014-07-14
 #This script is tcp status from netstat and alarm when it is over threshold.
 #changelog:
 #    0.1 tcp连接状态计数监控脚本
@@ -31,6 +31,7 @@
 #    1.5.0 配置文件中增加一项处理脚本的配置，可以在发生报警的时候触发执行处理脚本
 #    1.6.0 配置文件规范化为ini格式
 #    1.6.1 每个报警项设置触发脚本开关，报警触发处理脚本的时机提前到判断为报警状态时立即执行，执行命令在子线程中进行，如果子进程未结束，新的报警不会再次触发处理脚本。
+#    1.7.0 增加新的tcp状态计时和各超时报警配置
 
 use strict;
 use warnings;
@@ -79,7 +80,18 @@ my %threshold = (
     'CLOSING' => {'warning',30000,'alarm',50000,'switch','off','trigger','off'},
     'UNKNOWN' => {'warning',30000,'alarm',50000,'switch','off','trigger','off'},
     'Recv-Q' => {'warning',8192,'alarm',10240,'switch','on','trigger','on'},
-    'Send-Q' => {'warning'=>8192,'alarm'=>10240,'switch','on','trigger','on'}
+    'Send-Q' => {'warning',8192,'alarm',10240,'switch','on','trigger','on'},
+    'ESTABLISHED_time' => {'warning',300,'alarm',500,'switch','off','trigger','off'},
+    'SYN_SENT_time' => {'warning',300,'alarm',500,'switch','off','trigger','off'},
+    'SYN_RECV_time' => {'warning',300,'alarm',500,'switch','off','trigger','off'},
+    'FIN_WAIT1_time' => {'warning',300,'alarm',500,'switch','off','trigger','off'},
+    'FIN_WAIT2_time' => {'warning',300,'alarm',500,'switch','off','trigger','off'},
+    'TIME_WAIT_time' => {'warning',100,'alarm',200,'switch','off','trigger','off'},
+    'CLOSE_time' => {'warning',300,'alarm',500,'switch','off','trigger','off'},
+    'CLOSE_WAIT_time' => {'warning',300,'alarm',500,'switch','off','trigger','off'},
+    'LAST_ACK_time' => {'warning',300,'alarm',500,'switch','off','trigger','off'},
+    'CLOSING_time' => {'warning',300,'alarm',500,'switch','off','trigger','off'},
+    'UNKNOWN_time' => {'warning',300,'alarm',500,'switch','off','trigger','off'}
 );
 
 package IniParser;
@@ -145,7 +157,11 @@ if ($conf->{'err'}){
     &overWrite($action_script, $conf->val('main', 'action_script'));
     foreach my $state (keys %threshold){
         foreach my $key (keys %{$threshold{$state}}){
-            &overWrite($threshold{$state}{$key}, $conf->val('alarm', $state .'_'.$key));
+            if ( $state =~ /(.*)_time$/ ){
+                &overWrite($threshold{$state}{$key}, $conf->val('timeout', $1 .'_'.$key));
+            }else{
+                &overWrite($threshold{$state}{$key}, $conf->val('alarm', $state .'_'.$key));
+            }
         }
     }
 }
@@ -177,7 +193,6 @@ $netstat_cmd = 'C:\Windows\System32\NETSTAT -ano -p tcp';
 elsif ($os eq $os_aix)
 {
 }
-
 
 sub get_netstat
 {   
@@ -587,6 +602,50 @@ my %stats = (
         'ServerID'=>'tcp_send_q',
         'WarnID'=>'0015',
         'count'=>0},
+    'ESTABLISHED_time' => {
+        'ServerID'=>'tcp_established_time',
+        'WarnID'=>'0016',
+        'count'=>0},
+    'TIME_WAIT_time' => {
+        'ServerID'=>'tcp_time_wait_time',
+        'WarnID'=>'0017',
+        'count'=>0},
+    'CLOSE_WAIT_time' => {
+        'ServerID'=>'tcp_close_wait_time',
+        'WarnID'=>'0018',
+        'count'=>0},
+    'SYN_SENT_time' => {
+        'ServerID'=>'tcp_syn_sent_time',
+        'WarnID'=>'0019',
+        'count'=>0},
+    'SYN_RECV_time' => {
+        'ServerID'=>'tcp_syn_recv_time',
+        'WarnID'=>'0020',
+        'count'=>0},
+    'FIN_WAIT1_time' => {
+        'ServerID'=>'tcp_fin_wait1_time',
+        'WarnID'=>'0021',
+        'count'=>0},
+    'FIN_WAIT2_time' => {
+        'ServerID'=>'tcp_fin_wait2_time',
+        'WarnID'=>'0022',
+        'count'=>0},
+    'CLOSED_time' => {
+        'ServerID'=>'tcp_closed_time',
+        'WarnID'=>'0023',
+        'count'=>0},
+    'LAST_ACK_time' => {
+        'ServerID'=>'tcp_last_ack_time',
+        'WarnID'=>'0024',
+        'count'=>0},
+    'CLOSING_time' => {
+        'ServerID'=>'tcp_closing_time',
+        'WarnID'=>'0025',
+        'count'=>0},
+    'unknown_time' => {
+        'ServerID'=>'tcp_unknown_time',
+        'WarnID'=>'0026',
+        'count'=>0},
 );
 
 my $proCode = "99";
@@ -635,6 +694,7 @@ sub do_check
         my $alarm = 0;
         foreach my $stat (keys %conns)
         {
+            if ($threshold{$stat}{'switch'} ne 'on'){next;}
             if ($action == 0 and $action_err){
                 print ERR "$action_err\n";
                 $action_err = "";
@@ -713,7 +773,7 @@ sub do_check
                             $warnDetailMsg .= "$_ $conns{$stat}{'foreign'}{$_}个、"
                         }
                     }
-                    $warnShortMsg = "TCP Netstat 发现处于$stat状态的链接数为$warnValue超过阀值$threshold{$stat}{$level}，请关注，处于此状态的链接前五个为：$warnDetailMsg";
+                    $warnShortMsg = "在$date $time时TCP Netstat 发现处于$stat状态的链接数为$warnValue超过阀值$threshold{$stat}{$level}，请关注，处于此状态的链接前五个为：$warnDetailMsg";
                 }else{
                     $warnDetailMsg .= 'Local Address:';
                     foreach (@localSort)
@@ -747,7 +807,7 @@ sub do_check
                             $warnDetailMsg .= "$_ $conns{$stat}{'foreign'}{$_}、"
                         }
                     }
-                    $warnShortMsg = "TCP Netstat 发现$stat的值为$warnValue超过阀值$threshold{$stat}{$level}，请关注，处于此状态的链接前五个为：$warnDetailMsg";
+                    $warnShortMsg = "在$date $time时TCP Netstat 发现$stat的值为$warnValue超过阀值$threshold{$stat}{$level}，请关注，处于此状态的链接前五个为：$warnDetailMsg";
                 }
 
                 my $msg = "CUSTOM^$proCode^$date^$time^$seqID^$hostID^$serverID^$project^$source^$warnValue^$warnID^$warnLevel^$warnText^$warnShortMsg^$warnDetailMsg^$relType^$relID^$relText";
@@ -766,15 +826,81 @@ sub do_check
                 }
                 if ($debug eq 'on')
                 {
-                    print LOG "报警信息($stat 计数:$stats{$stat}{'count'}):总数$conns{$stat}{'total'},低于阀值，重置报警计数为0\n";
+                    print LOG "报警信息($stat 计数:$stats{$stat}{'count'}):总数$conns{$stat}{'total'},低于阀值$threshold{$stat}{'warning'}，重置报警计数为0\n";
                 }
                 $stats{$stat}{'count'} = 0;
             }
         }
-        for my $lk (keys %tcp_time){
-            if ($debug eq 'on')
+        #超时报警
+        foreach my $link (keys %tcp_time)
+        {
+            my ($stat,$local,$foreign) = split /\^/, $link;
+            if ($threshold{$stat.'_time'}{'switch'} ne 'on'){next;}
+            if ($action == 0 and $action_err){
+                print ERR "$action_err\n";
+                $action_err = "";
+            }
+            my $level = &level($stat.'_time',$tcp_time{$link});
+            if ($level ne "normal")
             {
-                print LOG "计时信息($lk 计时:$tcp_time{$lk}秒\n";
+                if ($alarm == 0 and $action_script and $threshold{$stat.'_time'}{'trigger'} eq 'on'){
+                    $alarm = 1;
+                    if ($action == 0)
+                    {
+                        $action = 1;
+                        if ($debug eq 'on')
+                        {
+                            print LOG "$stat\_time报警，触发执行处理脚本: $action_script\n";
+                        }
+                        my $action_t = threads->create( \&action_thread, $action_script);
+                        $action_t->detach();
+                    }else{
+                        if ($debug eq 'on'){
+                            print LOG "$stat\_time报警，上一次触发后脚本'$action_script'尚未执行完毕，本次跳过.\n";
+                        }
+                    }
+                }
+                $stats{$stat.'_time'}{'count'} += 1;
+                if ($stats{$stat.'_time'}{'count'} > 10){
+                    if ($debug eq 'on')
+                    {
+                        print LOG "报警信息($stat\_time 计数:$stats{$stat.'_time'}{'count'}):计时$tcp_time{$link}秒,报警次数超过上限10,跳过\n";
+                    }
+                    next;
+                }
+                my $warnValue = $tcp_time{$link};
+                my $serverID = $stats{$stat.'_time'}{"ServerID"};
+                my $warnID = $stats{$stat.'_time'}{"WarnID"};
+                
+                my ($warnLevel, $warnText);
+                if ($level eq "warning")
+                {
+                    $warnLevel = "0004";
+                    $warnText = "一般报警";
+                }
+                else
+                {
+                    $warnLevel = "0005";
+                    $warnText = "严重报警";
+                }
+
+                my $warnDetailMsg = "$local<->$foreign";
+                my $warnShortMsg = "在$date $time时TCP Netstat 发现有链接处于$stat状态达到$warnValue秒超过阀值$threshold{$stat.'_time'}{$level}，请关注，处于此状态的连接为:$warnDetailMsg";
+
+                my $msg = "CUSTOM^$proCode^$date^$time^$seqID^$hostID^$serverID^$project^$source^$warnValue^$warnID^$warnLevel^$warnText^$warnShortMsg^$warnDetailMsg^$relType^$relID^$relText";
+                if ($debug eq 'on')
+                {
+                    print LOG "报警信息($stat\_time 计数:".$stats{$stat.'_time'}{'count'}."):$msg\n";
+                }
+                &sendUDP("$msg");
+            }
+            else
+            {
+                if ($debug eq 'on')
+                {
+                    print LOG "报警信息($stat\_time 计数:$stats{$stat.'_time'}{'count'}):计时$tcp_time{$link}秒,低于阀值$threshold{$stat.'_time'}{'warning'}，重置报警计数为0\n";
+                }
+                $stats{$stat.'_time'}{'count'} = 0;
             }
         }
     }
