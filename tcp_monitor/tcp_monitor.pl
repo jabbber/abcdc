@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 #author:        zwj@skybility.com
 #version:       1.7.0
-#last modfiy:   2014-07-14
+#last modfiy:   2014-08-22
 #This script is tcp status from netstat and alarm when it is over threshold.
 #changelog:
 #    0.1 tcp连接状态计数监控脚本
@@ -1012,17 +1012,9 @@ elsif ($ARGV[0] eq '-d')
     $SIG{'HUP'}  = 'IGNORE';
 
     # start main loop.
-    my $pid = fork;
-    if ($pid == 0)
-    {
-        exit;
-    }
-    else
-    {
-        while(1) {
-            &do_check;
-            sleep $_refresh_rate;
-        }
+    while(1) {
+        &do_check;
+        sleep $_refresh_rate;
     }
 }
 else
