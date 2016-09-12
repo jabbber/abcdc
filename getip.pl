@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 #This script is use to get all ip address of a Suse Linux Server.
 #author: zwj
-#version: 0.3
+#version: 0.4
 #Oupput Format:
 #    host,perm,srv,float,man,other
 
@@ -48,6 +48,7 @@ foreach my $line (@iplines) {
     if ($line =~ /^\d+\:\slo/){next;}
     if ($line =~ /inet\s(.+?)\/\d+\s[\w\s.]+/){
         my $ip = $1;
+        if ($ip eq $PIP or $ip eq $SIP or $ip eq $FIP){next;}
         if (not $SIP){
             if ($ip =~ /^10\./){
                 $SIP = $ip;
@@ -60,11 +61,11 @@ foreach my $line (@iplines) {
                 next;
             }
         }
-        if ($ip eq $PIP or $ip eq $SIP or $ip eq $FIP){next;}
         $OIP = $OIP.",$ip";
     }
 }
 if (not $OIP){ $OIP = ',';}
 
+print "host,perm,srv,float,man,other\n";
 print "$hostname,$PIP,$SIP,$FIP,$MIP$OIP\n";
 
