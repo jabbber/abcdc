@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 #This script is use to get all ip address of a Suse Linux Server.
 #author: zwj
-#version: 0.6
+#version: 0.7
 #Oupput Format:
 #    host,perm,srv,float,man,other
 
@@ -34,20 +34,24 @@ if($ORACLE){
         if (not $FIP){ $FIP = '';}
     }
 }elsif ($HA){
-    if ($ipshow =~ /inet\s(.+?)\/\d+\s[\w\s.]+global\ssecondary/){
-        $FIP = $1;
+    my $haconf=`cat /opt/ha/conf/cluster.xml`;
+    if ($haconf =~ /network.+ipaddress="(.+?)"/){
+        $SIP = $1;
+        if (not $ipshow =~ /$SIP/){
+            $SIP = '';
+        }
     }
-    if ($ipshow =~ /\d+\:\s(\w+)\s+inet\s.+?\/\d+\s[\w\s.]+global\ssecondary/){
+    if ($haconf =~ /network.+netintf="(.+?)"/){
         my $SEth = $1;
         if ($ipshow =~ /$SEth\s+inet\s(.+?)\/\d+\s[\w\s.]+global\s/){
-            $SIP = $1;
+            $PIP = $1;
         }
     }
 }else{
-    if ($ipshow =~ /bond0\s+inet\s(10\.235\..+?)\/\d+\s[\w\s.]+global\s/){
+    if ($ipshow =~ /bond0\s+inet\s(10\.[(?:235)(?:227)]\..+?)\/\d+\s[\w\s.]+global\s/){
         $SIP = $1;
     }
-    if ($ipshow =~ /bond1\s+inet\s(10\.235\..+?)\/\d+\s[\w\s.]+global\s/){
+    if ($ipshow =~ /bond1\s+inet\s(10\.[(?:235)(?:227)]\..+?)\/\d+\s[\w\s.]+global\s/){
         $PIP = $1;
     }
 }
@@ -59,15 +63,21 @@ foreach my $line (@iplines) {
     if ($line =~ /inet\s(.+?)\/\d+\s[\w\s.]+/){
         my $ip = $1;
         if ($ip eq $PIP or $ip eq $SIP or $ip eq $FIP){next;}
-        if (not $SIP){
-            if ($ip =~ /^10\.235/){
+        if (not $SIP and not $HA){
+            if ($ip =~ /^10\.[(?:235)(?:227)]/){
                 $SIP = $ip;
                 next;
             }
         }
         if (not $PIP){
-            if ($ip =~ /^10\.235/){
+            if ($ip =~ /^10\.[(?:235)(?:227)]/){
                 $PIP = $ip;
+                next;
+            }
+        }
+        if (not $MIP and $HA){
+            if ($ip =~ /^10\.[(?:235)(?:227)]/){
+                $MIP = $ip;
                 next;
             }
         }
